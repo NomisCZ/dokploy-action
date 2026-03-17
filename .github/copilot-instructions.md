@@ -1,6 +1,6 @@
 # RTK (Rust Token Killer) - Token Compression
 
-**Always prefix shell/terminal commands with `rtk`** (located at `C:\Users\ssanj\rtk\rtk.exe`, also on PATH).
+**Always prefix shell/terminal commands with `rtk`** (located at `C:\rtk\rtk.exe`, also on PATH).
 
 RTK is a transparent command wrapper that compresses verbose CLI output to save tokens. If RTK has a dedicated filter for a command, it compresses the output (60-99% savings). If not, it passes through unchanged. **RTK is always safe to use.**
 
