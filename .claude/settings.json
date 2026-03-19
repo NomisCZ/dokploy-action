@@ -1,0 +1,32 @@
+{
+  "hooks": {
+    "PreToolUse": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "bash .claude/hooks/tool-guardian/guard-tool.sh",
+            "timeout": 10,
+            "statusMessage": "Tool Guardian scanning..."
+          }
+        ]
+      }
+    ],
+    "SessionEnd": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "bash .claude/hooks/dependency-license-checker/check-licenses.sh",
+            "timeout": 60,
+            "statusMessage": "Checking dependency licenses..."
+          }
+        ]
+      }
+    ]
+  },
+  "env": {
+    "GUARD_MODE": "block",
+    "LICENSE_MODE": "warn"
+  }
+}
