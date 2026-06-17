@@ -259,6 +259,42 @@ describe('DokployClient', () => {
     })
   })
 
+  describe('saveDockerProvider', () => {
+    it('should send empty credentials when username and password are missing', async () => {
+      const postSpy = jest.spyOn(client as any, 'post').mockResolvedValue(undefined)
+
+      await client.saveDockerProvider('app-123', 'ghcr.io/org/app:latest')
+
+      expect(postSpy).toHaveBeenCalledWith('/api/application.saveDockerProvider', {
+        applicationId: 'app-123',
+        dockerImage: 'ghcr.io/org/app:latest',
+        registryUrl: 'ghcr.io',
+        username: '',
+        password: ''
+      })
+    })
+
+    it('should preserve explicitly provided credentials', async () => {
+      const postSpy = jest.spyOn(client as any, 'post').mockResolvedValue(undefined)
+
+      await client.saveDockerProvider(
+        'app-123',
+        'ghcr.io/org/app:latest',
+        'ghcr.io',
+        'my-user',
+        'my-token'
+      )
+
+      expect(postSpy).toHaveBeenCalledWith('/api/application.saveDockerProvider', {
+        applicationId: 'app-123',
+        dockerImage: 'ghcr.io/org/app:latest',
+        registryUrl: 'ghcr.io',
+        username: 'my-user',
+        password: 'my-token'
+      })
+    })
+  })
+
   describe('Response Parsing', () => {
     it('should handle nested project response', async () => {
       const response = {
