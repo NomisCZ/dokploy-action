@@ -199,7 +199,7 @@ export function parseInputs(): ActionInputs {
 
     // Server
     serverId: parseOptionalStringInput('server-id'),
-    serverName: parseOptionalStringInput('server-name') || 'Hostinger-Server1',
+    serverName: parseOptionalStringInput('server-name'),
 
     // Resources
     memoryLimit: parseIntInput(parseOptionalStringInput('memory-limit'), 'memory-limit'),
@@ -221,7 +221,7 @@ export function parseInputs(): ActionInputs {
     replicas: parseIntInput(parseOptionalStringInput('replicas'), 'replicas'),
 
     // Registry
-    registryUrl: parseOptionalStringInput('registry-url') || 'ghcr.io',
+    registryUrl: parseOptionalStringInput('registry-url'),
     registryUsername: parseOptionalStringInput('registry-username'),
     registryPassword,
 

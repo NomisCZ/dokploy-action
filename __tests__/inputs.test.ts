@@ -103,8 +103,8 @@ describe('parseInputs', () => {
     const result = parseInputs()
 
     expect(result.environmentName).toBe('production')
-    expect(result.serverName).toBe('Hostinger-Server1')
-    expect(result.registryUrl).toBe('ghcr.io')
+    expect(result.serverName).toBeUndefined()
+    expect(result.registryUrl).toBeUndefined()
     expect(result.autoCreateResources).toBe(true)
     expect(result.waitForDeployment).toBe(true)
     expect(result.healthCheckEnabled).toBe(true)

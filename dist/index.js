@@ -27590,7 +27590,7 @@ function parseInputs() {
         containerName: (0, helpers_1.parseOptionalStringInput)('container-name'),
         // Server
         serverId: (0, helpers_1.parseOptionalStringInput)('server-id'),
-        serverName: (0, helpers_1.parseOptionalStringInput)('server-name') || 'Hostinger-Server1',
+        serverName: (0, helpers_1.parseOptionalStringInput)('server-name'),
         // Resources
         memoryLimit: (0, helpers_1.parseIntInput)((0, helpers_1.parseOptionalStringInput)('memory-limit'), 'memory-limit'),
         memoryReservation: (0, helpers_1.parseIntInput)((0, helpers_1.parseOptionalStringInput)('memory-reservation'), 'memory-reservation'),
@@ -27605,7 +27605,7 @@ function parseInputs() {
         // Scaling
         replicas: (0, helpers_1.parseIntInput)((0, helpers_1.parseOptionalStringInput)('replicas'), 'replicas'),
         // Registry
-        registryUrl: (0, helpers_1.parseOptionalStringInput)('registry-url') || 'ghcr.io',
+        registryUrl: (0, helpers_1.parseOptionalStringInput)('registry-url'),
         registryUsername: (0, helpers_1.parseOptionalStringInput)('registry-username'),
         registryPassword,
         // Environment Variables
