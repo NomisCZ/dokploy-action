@@ -215,7 +215,7 @@ inputs:
   registry-url:
     description: 'Docker registry URL (e.g., ghcr.io)'
     required: false
-    default: 'ghcr.io'
+    default: ''
 
   registry-username:
     description: 'Docker registry username'

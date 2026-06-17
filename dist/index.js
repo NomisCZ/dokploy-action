@@ -25918,9 +25918,9 @@ class DokployClient {
         await this.post('/api/application.saveDockerProvider', {
             applicationId,
             dockerImage,
-            registryUrl: registryUrl || 'ghcr.io',
-            username,
-            password
+            registryUrl: registryUrl || '',
+            username: username || '',
+            password: password || ''
         });
         core.info(`✅ Docker provider configured: ${dockerImage}`);
     }
