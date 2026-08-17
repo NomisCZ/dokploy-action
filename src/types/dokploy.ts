@@ -93,13 +93,17 @@ export interface Container {
 export interface Deployment {
   deploymentId?: string
   id?: string
-  applicationId: string
+  applicationId?: string
+  composeId?: string
   title?: string
   description?: string
-  status?: 'deploying' | 'completed' | 'failed' | 'pending'
+  status?: 'idle' | 'running' | 'done' | 'error' | 'deploying' | 'completed' | 'failed' | 'pending'
   startedAt?: string
   completedAt?: string
+  finishedAt?: string
+  createdAt?: string
   logs?: string
+  errorMessage?: string
 }
 
 export interface Compose {
@@ -138,62 +142,22 @@ export interface ActionInputs {
   composeFile?: string
   composeRaw?: string
   composeName?: string
-  composeServiceName?: string
   dokployTemplateBase64?: string
 
   // Project & Environment
   projectId?: string
   projectName?: string
-  projectDescription?: string
   environmentId?: string
   environmentName?: string
-  autoCreateResources?: boolean
 
   // Application
   applicationId?: string
   applicationName?: string
-  applicationTitle?: string
-  applicationDescription?: string
-  containerName?: string
-
-  // Server
-  serverId?: string
-  serverName?: string
-
-  // Resources
-  memoryLimit?: number
-  memoryReservation?: number
-  cpuLimit?: number
-  cpuReservation?: number
-  port?: number
-  targetPort?: number
-  restartPolicy?: string
-
-  // Docker Advanced
-  volumes?: string
-  groupAdd?: string
-
-  // Scaling
-  replicas?: number
 
   // Registry
   registryUrl?: string
   registryUsername?: string
   registryPassword?: string
-
-  // Environment Variables
-  env?: string
-  envFile?: string
-  envFromJson?: string
-
-  // Domain & SSL
-  domainHost?: string
-  domainPath?: string
-  applicationPort?: number
-  domainHttps?: boolean
-  sslCertificateType?: string
-  domainStripPath?: boolean
-  forceDomainRecreation?: boolean
 
   // Deployment
   deploymentTitle?: string
@@ -221,8 +185,6 @@ export interface ActionOutputs {
   applicationId?: string
   projectId?: string
   environmentId?: string
-  serverId?: string
-  deploymentUrl?: string
   deploymentStatus?: string
   healthCheckStatus?: string
 }

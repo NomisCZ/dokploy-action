@@ -105,7 +105,6 @@ jobs:
           docker-image: 'nginx:latest'
           project-name: 'test-project'
           environment-name: 'test'
-          server-name: 'test-server'
 
       - name: Verify action structure
         run: |

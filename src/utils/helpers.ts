@@ -30,34 +30,55 @@ export function parseOptionalStringInput(key: string): string | undefined {
   return value && value.trim() !== '' ? value.trim() : undefined
 }
 
-export function parseCpuLimit(value: string | undefined): number | undefined {
-  if (!value || value === '') {
+export interface ParsedDokployUrl {
+  baseUrl: string
+  basicAuthHeader?: string
+}
+
+/**
+ * Split optional HTTP Basic credentials from dokploy-url.
+ * @actions/http-client ignores URL userinfo, so we convert it to an Authorization header.
+ */
+export function parseDokployUrl(url: string): ParsedDokployUrl {
+  const parsed = new URL(url)
+  const username = decodeURIComponent(parsed.username)
+  const password = decodeURIComponent(parsed.password)
+
+  parsed.username = ''
+  parsed.password = ''
+  const baseUrl = parsed.toString().replace(/\/$/, '')
+
+  if (!username && !password) {
+    return { baseUrl }
+  }
+
+  return {
+    baseUrl,
+    basicAuthHeader: `Basic ${Buffer.from(`${username}:${password}`).toString('base64')}`
+  }
+}
+
+export function getDeploymentId(deployment: unknown): string | undefined {
+  if (!deployment || typeof deployment !== 'object') {
     return undefined
   }
-  // CPU limits can be:
-  // - Decimal values: 0.5, 1.0, 2.5
-  // - Integer values: 1, 2, 4
-  // - Millicpu values with 'm' suffix: 500m, 1000m (convert to decimal)
-  
-  const cleanValue = value.toString().trim()
-  
-  // Handle millicpu format (e.g., "500m" = 0.5 CPU)
-  if (cleanValue.endsWith('m') || cleanValue.endsWith('M')) {
-    const milliValue = parseInt(cleanValue.slice(0, -1), 10)
-    if (isNaN(milliValue)) {
-      throw new Error(`CPU limit must be a valid number, got: ${value}`)
-    }
-    // Convert millicpu to decimal (1000m = 1.0 CPU)
-    return milliValue / 1000
+
+  const record = deployment as { deploymentId?: unknown; id?: unknown }
+  if (typeof record.deploymentId === 'string' && record.deploymentId.length > 0) {
+    return record.deploymentId
   }
-  
-  // Parse as decimal number
-  const parsed = parseFloat(cleanValue)
-  if (isNaN(parsed)) {
-    throw new Error(`CPU limit must be a valid number, got: ${value}`)
+  if (typeof record.id === 'string' && record.id.length > 0) {
+    return record.id
   }
-  
-  return parsed
+  return undefined
+}
+
+export function isDeploymentSuccessful(status?: string): boolean {
+  return status === 'done' || status === 'completed'
+}
+
+export function isDeploymentFailed(status?: string): boolean {
+  return status === 'error' || status === 'failed'
 }
 
 export function sleep(ms: number): Promise<void> {

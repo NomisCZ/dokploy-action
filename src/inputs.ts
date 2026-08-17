@@ -8,7 +8,6 @@ import {
   parseOptionalStringInput,
   parseIntInput,
   parseBooleanInput,
-  parseCpuLimit,
   sanitizeSecret
 } from './utils/helpers'
 
@@ -96,7 +95,7 @@ export function parseInputs(): ActionInputs {
     const composeFile = parseOptionalStringInput('compose-file')
     const composeRaw = parseOptionalStringInput('compose-raw')
     const dokployTemplateBase64 = parseOptionalStringInput('dokploy-template-base64')
-    
+
     if (!composeFile && !composeRaw && !dokployTemplateBase64) {
       core.error('❌ Missing compose source for compose deployment')
       core.error('')
@@ -105,13 +104,21 @@ export function parseInputs(): ActionInputs {
       core.error('  • compose-raw: Raw docker-compose.yml content')
       core.error('  • dokploy-template-base64: Base64-encoded Dokploy template')
       core.error('')
-      throw new Error('Compose deployment requires compose-file, compose-raw, or dokploy-template-base64')
+      throw new Error(
+        'Compose deployment requires compose-file, compose-raw, or dokploy-template-base64'
+      )
     }
   }
 
-  // Validate URL format
+  // Validate URL format and mask optional Basic Auth credentials
   try {
-    new URL(dokployUrl)
+    const parsedUrl = new URL(dokployUrl)
+    if (parsedUrl.username) {
+      sanitizeSecret(decodeURIComponent(parsedUrl.username))
+    }
+    if (parsedUrl.password) {
+      sanitizeSecret(decodeURIComponent(parsedUrl.password))
+    }
   } catch (error) {
     core.error('❌ Invalid dokploy-url format')
     core.error('')
@@ -130,41 +137,6 @@ export function parseInputs(): ActionInputs {
     sanitizeSecret(registryPassword)
   }
 
-  // Parse inputs
-  const volumes = parseOptionalStringInput('volumes')
-  const groupAdd = parseOptionalStringInput('group-add')
-
-  // Validate Docker advanced settings with deployment type
-  if (deploymentType === 'application' && (volumes || groupAdd)) {
-    core.error('❌ Docker advanced settings (volumes, group-add) are not supported with application deployment')
-    core.error('')
-    core.error('The following parameters are not supported by Dokploy API for application deployments:')
-    if (volumes) core.error('  • volumes')
-    if (groupAdd) core.error('  • group-add')
-    core.error('')
-    core.error('These settings require Docker Compose deployment for full control.')
-    core.error('')
-    core.error('To fix this, switch to Docker Compose deployment:')
-    core.error('')
-    core.error('  with:')
-    core.error('    deployment-type: compose')
-    core.error('    compose-file: docker-compose.yml')
-    core.error('    # OR')
-    core.error('    compose-raw: |')
-    core.error('      version: "3.8"')
-    core.error('      services:')
-    core.error('        app:')
-    core.error('          image: your-image:tag')
-    core.error('          volumes:')
-    core.error('            - /var/run/docker.sock:/var/run/docker.sock')
-    core.error('          group_add:')
-    core.error('            - 988')
-    core.error('')
-    core.error('Documentation: https://docs.dokploy.com/docs/core/docker-compose')
-    core.error('')
-    throw new Error('Docker advanced settings (volumes, group-add) require compose deployment type')
-  }
-
   return {
     // Core
     dokployUrl,
@@ -178,69 +150,22 @@ export function parseInputs(): ActionInputs {
     composeFile: parseOptionalStringInput('compose-file'),
     composeRaw: parseOptionalStringInput('compose-raw'),
     composeName: parseOptionalStringInput('compose-name'),
-    composeServiceName: parseOptionalStringInput('compose-service-name'),
     dokployTemplateBase64: parseOptionalStringInput('dokploy-template-base64'),
 
     // Project & Environment
     projectId: parseOptionalStringInput('project-id'),
     projectName: parseOptionalStringInput('project-name'),
-    projectDescription: parseOptionalStringInput('project-description'),
     environmentId: parseOptionalStringInput('environment-id'),
     environmentName: parseOptionalStringInput('environment-name') || 'production',
-    autoCreateResources:
-      parseBooleanInput(parseOptionalStringInput('auto-create-resources')) ?? true,
 
     // Application
     applicationId: parseOptionalStringInput('application-id'),
     applicationName: parseOptionalStringInput('application-name'),
-    applicationTitle: parseOptionalStringInput('application-title'),
-    applicationDescription: parseOptionalStringInput('application-description'),
-    containerName: parseOptionalStringInput('container-name'),
-
-    // Server
-    serverId: parseOptionalStringInput('server-id'),
-    serverName: parseOptionalStringInput('server-name'),
-
-    // Resources
-    memoryLimit: parseIntInput(parseOptionalStringInput('memory-limit'), 'memory-limit'),
-    memoryReservation: parseIntInput(
-      parseOptionalStringInput('memory-reservation'),
-      'memory-reservation'
-    ),
-    cpuLimit: parseCpuLimit(parseOptionalStringInput('cpu-limit')),
-    cpuReservation: parseCpuLimit(parseOptionalStringInput('cpu-reservation')),
-    port: parseIntInput(parseOptionalStringInput('port'), 'port'),
-    targetPort: parseIntInput(parseOptionalStringInput('target-port'), 'target-port'),
-    restartPolicy: parseOptionalStringInput('restart-policy'),
-
-    // Docker Advanced
-    volumes,
-    groupAdd,
-
-    // Scaling
-    replicas: parseIntInput(parseOptionalStringInput('replicas'), 'replicas'),
 
     // Registry
     registryUrl: parseOptionalStringInput('registry-url'),
     registryUsername: parseOptionalStringInput('registry-username'),
     registryPassword,
-
-    // Environment Variables
-    env: parseOptionalStringInput('env'),
-    envFile: parseOptionalStringInput('env-file'),
-    envFromJson: parseOptionalStringInput('env-from-json'),
-
-    // Domain & SSL
-    domainHost: parseOptionalStringInput('domain-host'),
-    domainPath: parseOptionalStringInput('domain-path'),
-    applicationPort: parseIntInput(
-      parseOptionalStringInput('application-port'),
-      'application-port'
-    ),
-    domainHttps: parseBooleanInput(parseOptionalStringInput('domain-https')) ?? true,
-    sslCertificateType: parseOptionalStringInput('ssl-certificate-type'),
-    domainStripPath: parseBooleanInput(parseOptionalStringInput('domain-strip-path')),
-    forceDomainRecreation: parseBooleanInput(parseOptionalStringInput('force-domain-recreation')),
 
     // Deployment
     deploymentTitle: parseOptionalStringInput('deployment-title'),

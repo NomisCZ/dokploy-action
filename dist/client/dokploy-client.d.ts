@@ -2,7 +2,7 @@
  * Dokploy API Client
  * Comprehensive wrapper for all Dokploy API endpoints
  */
-import type { DokployConfig, Project, Environment, Server, Application, Domain, Container, Deployment, Compose } from '../types/dokploy';
+import type { DokployConfig, Project, Environment, Application, Container, Deployment, Compose } from '../types/dokploy';
 export declare class DokployClient {
     private baseUrl;
     private apiKey;
@@ -20,44 +20,23 @@ export declare class DokployClient {
     getAllProjects(): Promise<Project[]>;
     getProject(projectId: string): Promise<Project>;
     findProjectByName(projectName: string): Promise<Project | undefined>;
-    createProject(name: string, description?: string): Promise<{
-        projectId: string;
-        defaultEnvironmentId?: string;
-    }>;
-    createEnvironment(projectId: string, environmentName: string): Promise<string>;
     findEnvironmentInProject(projectId: string, environmentName: string): Promise<Environment | undefined>;
-    getAllServers(): Promise<Server[]>;
-    findServerByName(serverName: string): Promise<Server | undefined>;
-    resolveServerId(serverId?: string, serverName?: string): Promise<string>;
     getApplication(applicationId: string): Promise<Application>;
-    createApplication(config: Partial<Application>): Promise<string>;
-    updateApplication(applicationId: string, config: Record<string, unknown>): Promise<void>;
-    saveApplicationResources(applicationId: string, memoryLimit?: number, memoryReservation?: number, cpuLimit?: number, cpuReservation?: number, replicas?: number, restartPolicy?: string): Promise<void>;
     saveDockerProvider(applicationId: string, dockerImage: string, registryUrl?: string, username?: string, password?: string): Promise<void>;
-    /**
-     * Configure Docker advanced settings (volumes, group_add)
-     * Uses the mounts.create API for bind mounts/volumes
-     * These settings are passed directly to Docker/Docker Swarm
-     */
-    saveDockerAdvancedSettings(applicationId: string, volumes?: string, groupAdd?: string): Promise<void>;
-    saveEnvironment(applicationId: string, envString: string): Promise<void>;
-    createDomain(applicationId: string, domainConfig: Partial<Domain>): Promise<Domain>;
-    createComposeDomain(composeId: string, serviceName: string, domainConfig: Partial<Domain>): Promise<Domain>;
-    getDomainsByComposeId(composeId: string): Promise<Domain[]>;
-    updateDomain(domainId: string, domainConfig: Partial<Domain>): Promise<Domain>;
-    removeDomain(domainId: string): Promise<void>;
-    getDomains(applicationId: string): Promise<Domain[]>;
     stopApplication(applicationId: string): Promise<void>;
-    deployApplication(applicationId: string, title?: string, description?: string): Promise<Deployment | null>;
-    getDeployment(deploymentId: string): Promise<Deployment>;
-    getDeploymentLogs(deploymentId: string): Promise<string>;
-    waitForDeployment(deploymentId: string, timeoutSeconds?: number, pollIntervalSeconds?: number): Promise<Deployment>;
+    deployApplication(applicationId: string, title?: string, description?: string): Promise<void>;
+    listApplicationDeployments(applicationId: string): Promise<Deployment[]>;
+    listComposeDeployments(composeId: string): Promise<Deployment[]>;
+    waitForServiceDeployment(options: {
+        kind: 'application' | 'compose';
+        serviceId: string;
+        previousDeploymentIds?: string[];
+        startedAfterMs?: number;
+        timeoutSeconds?: number;
+        pollIntervalSeconds?: number;
+    }): Promise<Deployment>;
     getContainers(applicationId: string): Promise<Container[]>;
     removeContainer(containerName: string): Promise<void>;
-    /**
-     * Create a new Compose service
-     */
-    createCompose(config: Partial<Compose>): Promise<string>;
     /**
      * Get environments for a project
      */
@@ -77,16 +56,11 @@ export declare class DokployClient {
     /**
      * Deploy a compose service
      */
-    deployCompose(composeId: string, title?: string, description?: string): Promise<Deployment>;
+    deployCompose(composeId: string, title?: string, description?: string): Promise<void>;
     /**
-     * Save compose file content and environment variables
-     * Uses compose.update to set both composeFile and env
+     * Save compose file content.
+     * Uses compose.update to set composeFile.
      */
-    saveComposeFile(composeId: string, composeFile: string, envString?: string): Promise<void>;
-    /**
-     * Save environment variables for compose service
-     * Uses compose.update
-     */
-    saveComposeEnvironment(composeId: string, envString: string): Promise<void>;
+    saveComposeFile(composeId: string, composeFile: string): Promise<void>;
 }
 //# sourceMappingURL=dokploy-client.d.ts.map

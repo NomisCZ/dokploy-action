@@ -9,14 +9,21 @@ import type {
   DokployConfig,
   Project,
   Environment,
-  Server,
   Application,
-  Domain,
   Container,
   Deployment,
   Compose
 } from '../types/dokploy'
-import { debugLog, logApiRequest, logApiResponse, sleep } from '../utils/helpers'
+import {
+  debugLog,
+  logApiRequest,
+  logApiResponse,
+  parseDokployUrl,
+  sleep,
+  getDeploymentId,
+  isDeploymentSuccessful,
+  isDeploymentFailed
+} from '../utils/helpers'
 
 export class DokployClient {
   private baseUrl: string
@@ -26,14 +33,21 @@ export class DokployClient {
 
   constructor(config: DokployConfig) {
     this.config = config
-    this.baseUrl = config.url.replace(/\/$/, '') // Remove trailing slash
+    const { baseUrl, basicAuthHeader } = parseDokployUrl(config.url)
+    this.baseUrl = baseUrl
     this.apiKey = config.apiKey
+
+    const headers: Record<string, string> = {
+      accept: 'application/json',
+      'content-type': 'application/json',
+      'x-api-key': config.apiKey
+    }
+    if (basicAuthHeader) {
+      headers.Authorization = basicAuthHeader
+    }
+
     this.client = new httpm.HttpClient('dokploy-github-action', undefined, {
-      headers: {
-        accept: 'application/json',
-        'content-type': 'application/json',
-        'x-api-key': config.apiKey
-      }
+      headers
     })
   }
 
@@ -107,81 +121,9 @@ export class DokployClient {
     return projects.find(p => p.name === projectName)
   }
 
-  async createProject(
-    name: string,
-    description?: string
-  ): Promise<{ projectId: string; defaultEnvironmentId?: string }> {
-    core.info(`📋 Creating project: ${name}`)
-    const response = await this.post<{
-      project?: Project
-      environment?: Environment
-      projectId?: string
-      id?: string
-    }>('/api/project.create', {
-      name,
-      description: description || `Automated deployment project: ${name}`
-    })
-
-    // Log the full response for debugging
-    debugLog('Project creation response', response)
-
-    // Dokploy API returns nested structure: { project: {...}, environment: {...} }
-    // The API automatically creates a default "production" environment
-    const project = response.project || response
-    const projectId = project.projectId || project.id || ''
-
-    if (!projectId) {
-      core.error('❌ Failed to get project ID from API response')
-      core.error(`Response keys: ${Object.keys(response).join(', ')}`)
-      core.error(`Full response: ${JSON.stringify(response, null, 2)}`)
-      throw new Error('Failed to create project: No project ID in response')
-    }
-
-    // Extract default environment ID if created
-    let defaultEnvironmentId: string | undefined
-    if (response.environment) {
-      defaultEnvironmentId = response.environment.environmentId || response.environment.id
-      if (defaultEnvironmentId) {
-        core.info(
-          `✅ Default environment created: ${response.environment.name} (ID: ${defaultEnvironmentId})`
-        )
-      }
-    }
-
-    core.info(`✅ Created project: ${name} (ID: ${projectId})`)
-    return { projectId, defaultEnvironmentId }
-  }
-
   // ========================================================================
   // Environment Management
   // ========================================================================
-
-  async createEnvironment(projectId: string, environmentName: string): Promise<string> {
-    core.info(`🌍 Creating environment: ${environmentName}`)
-    const response = await this.post<{
-      environment?: Environment
-      environmentId?: string
-      id?: string
-    }>('/api/environment.create', {
-      projectId,
-      name: environmentName
-    })
-
-    debugLog('Environment creation response', response)
-
-    // Dokploy API may return nested structure or direct object
-    const environment = response.environment || response
-    const environmentId = environment.environmentId || environment.id || ''
-
-    if (!environmentId) {
-      core.error('❌ Failed to get environment ID from API response')
-      core.error(`Full response: ${JSON.stringify(response, null, 2)}`)
-      throw new Error('Failed to create environment: No environment ID in response')
-    }
-
-    core.info(`✅ Created environment: ${environmentName} (ID: ${environmentId})`)
-    return environmentId
-  }
 
   async findEnvironmentInProject(
     projectId: string,
@@ -194,116 +136,12 @@ export class DokployClient {
   }
 
   // ========================================================================
-  // Server Management
-  // ========================================================================
-
-  async getAllServers(): Promise<Server[]> {
-    debugLog('Fetching all servers')
-    return await this.get<Server[]>('/api/server.all')
-  }
-
-  async findServerByName(serverName: string): Promise<Server | undefined> {
-    debugLog(`Finding server by name: ${serverName}`)
-    const servers = await this.getAllServers()
-    // Case-insensitive lookup to handle DNS-compliant lowercase names
-    return servers.find(s => s.name.toLowerCase() === serverName.toLowerCase())
-  }
-
-  async resolveServerId(serverId?: string, serverName?: string): Promise<string> {
-    if (serverId) {
-      debugLog(`Using provided server ID: ${serverId}`)
-      return serverId
-    }
-
-    if (serverName) {
-      const server = await this.findServerByName(serverName)
-      if (!server) {
-        throw new Error(`Server "${serverName}" not found`)
-      }
-      const id = server.serverId || server.id || ''
-      core.info(`✅ Found server: ${serverName} (ID: ${id})`)
-      return id
-    }
-
-    throw new Error('Either server-id or server-name must be provided')
-  }
-
-  // ========================================================================
   // Application Management
   // ========================================================================
 
   async getApplication(applicationId: string): Promise<Application> {
     debugLog(`Fetching application: ${applicationId}`)
     return await this.get<Application>(`/api/application.one?applicationId=${applicationId}`)
-  }
-
-  async createApplication(config: Partial<Application>): Promise<string> {
-    core.info(`📦 Creating application: ${config.name}`)
-    debugLog('Application configuration', config)
-
-    const response = await this.post<{
-      application?: Application
-      applicationId?: string
-      id?: string
-    }>('/api/application.create', config)
-
-    debugLog('Application creation response', response)
-
-    // Dokploy API may return nested structure or direct object
-    const application = response.application || response
-    const applicationId = application.applicationId || application.id || ''
-
-    if (!applicationId) {
-      core.error('❌ Failed to get application ID from API response')
-      core.error(`Full response: ${JSON.stringify(response, null, 2)}`)
-      throw new Error('Failed to create application: No application ID in response')
-    }
-
-    core.info(`✅ Created application: ${config.name} (ID: ${applicationId})`)
-    return applicationId
-  }
-
-  async updateApplication(
-    applicationId: string,
-    config: Record<string, unknown>
-  ): Promise<void> {
-    core.info(`🔄 Updating application: ${applicationId}`)
-    debugLog('Update configuration', config)
-
-    await this.post('/api/application.update', config)
-    core.info(`✅ Updated application: ${applicationId}`)
-  }
-
-  async saveApplicationResources(
-    applicationId: string,
-    memoryLimit?: number,
-    memoryReservation?: number,
-    cpuLimit?: number,
-    cpuReservation?: number,
-    replicas?: number,
-    restartPolicy?: string
-  ): Promise<void> {
-    core.info(`⚙️ Updating application resources: ${applicationId}`)
-    debugLog('Resource configuration', {
-      memoryLimit,
-      memoryReservation,
-      cpuLimit,
-      cpuReservation,
-      replicas,
-      restartPolicy
-    })
-
-    const payload: Record<string, unknown> = { applicationId }
-    
-    if (memoryLimit !== undefined) payload.memoryLimit = memoryLimit
-    if (memoryReservation !== undefined) payload.memoryReservation = memoryReservation
-    if (cpuLimit !== undefined) payload.cpuLimit = cpuLimit
-    if (cpuReservation !== undefined) payload.cpuReservation = cpuReservation
-    if (replicas !== undefined) payload.replicas = replicas
-    if (restartPolicy !== undefined) payload.restartPolicy = restartPolicy
-
-    await this.post('/api/application.saveAdvanced', payload)
-    core.info(`✅ Application resources updated`)
   }
 
   // ========================================================================
@@ -336,140 +174,6 @@ export class DokployClient {
     core.info(`✅ Docker provider configured: ${dockerImage}`)
   }
 
-  /**
-   * Configure Docker advanced settings (volumes, group_add)
-   * Uses the mounts.create API for bind mounts/volumes
-   * These settings are passed directly to Docker/Docker Swarm
-   */
-  async saveDockerAdvancedSettings(
-    applicationId: string,
-    volumes?: string,
-    groupAdd?: string
-  ): Promise<void> {
-    if (!volumes && !groupAdd) {
-      return // Nothing to configure
-    }
-
-    core.info(`⚙️ Configuring Docker advanced settings for application: ${applicationId}`)
-
-    // Parse volumes and create mounts using mounts.create API
-    if (volumes) {
-      const volumeList = volumes
-        .split('\n')
-        .map(v => v.trim())
-        .filter(v => v.length > 0)
-      
-      if (volumeList.length > 0) {
-        core.info(`  Volumes: ${volumeList.length} mount(s)`)
-        
-        for (const vol of volumeList) {
-          // Parse volume string: host_path:container_path[:ro]
-          const parts = vol.split(':')
-          if (parts.length >= 2) {
-            const hostPath = parts[0]
-            const mountPath = parts[1]
-            core.info(`    - ${hostPath}:${mountPath}`)
-            
-            // Create mount using mounts.create API
-            await this.post('/api/mounts.create', {
-              serviceId: applicationId,
-              mountPath,
-              hostPath,
-              type: 'bind',
-              serviceType: 'application'
-            })
-          }
-        }
-      }
-    }
-
-    // Note: group_add is not directly supported by Dokploy API
-    // It would need to be configured via Docker Compose or custom Swarm settings
-    if (groupAdd) {
-      core.warning(`⚠️ group-add parameter is not directly supported by Dokploy API`)
-      core.warning(`   Consider using Docker Compose deployment type for full group_add support`)
-      core.info(`   Requested groups: ${groupAdd}`)
-    }
-
-    core.info(`✅ Docker advanced settings configured`)
-  }
-
-  // ========================================================================
-  // Environment Variables
-  // ========================================================================
-
-  async saveEnvironment(applicationId: string, envString: string): Promise<void> {
-    core.info(`🌍 Configuring environment variables for application: ${applicationId}`)
-    const lineCount = envString ? envString.split('\n').length : 0
-    debugLog(`Saving ${lineCount} environment variables`)
-
-    await this.post('/api/application.saveEnvironment', {
-      applicationId,
-      env: envString
-    })
-    core.info(`✅ Environment variables configured (${lineCount} lines)`)
-  }
-
-  // ========================================================================
-  // Domain Management
-  // ========================================================================
-
-  async createDomain(applicationId: string, domainConfig: Partial<Domain>): Promise<Domain> {
-    core.info(`🌐 Creating domain: ${domainConfig.host}`)
-    debugLog('Domain configuration', domainConfig)
-
-    const result = await this.post<Domain>('/api/domain.create', {
-      applicationId,
-      ...domainConfig
-    })
-    core.info(`✅ Domain created: ${domainConfig.host} (SSL: ${domainConfig.certificateType})`)
-    return result
-  }
-
-  async createComposeDomain(composeId: string, serviceName: string, domainConfig: Partial<Domain>): Promise<Domain> {
-    core.info(`🌐 Creating compose domain: ${domainConfig.host} for service: ${serviceName}`)
-    debugLog('Compose domain configuration', { serviceName, ...domainConfig })
-
-    const result = await this.post<Domain>('/api/domain.create', {
-      composeId,
-      domainType: 'compose',
-      serviceName,
-      ...domainConfig
-    })
-    core.info(`✅ Compose domain created: ${domainConfig.host} → ${serviceName} (SSL: ${domainConfig.certificateType})`)
-    return result
-  }
-
-  async getDomainsByComposeId(composeId: string): Promise<Domain[]> {
-    debugLog('Getting domains for compose', { composeId })
-    const result = await this.get<Domain[]>(`/api/domain.byComposeId?composeId=${composeId}`)
-    return result || []
-  }
-
-  async updateDomain(domainId: string, domainConfig: Partial<Domain>): Promise<Domain> {
-    core.info(`🔄 Updating domain: ${domainConfig.host}`)
-    debugLog('Domain update configuration', domainConfig)
-
-    const result = await this.post<Domain>('/api/domain.update', {
-      domainId,
-      ...domainConfig
-    })
-    core.info(`✅ Domain updated: ${domainConfig.host} (SSL: ${domainConfig.certificateType})`)
-    return result
-  }
-
-  async removeDomain(domainId: string): Promise<void> {
-    core.info(`🗑️ Removing domain: ${domainId}`)
-    await this.post('/api/domain.delete', { domainId })
-    core.info(`✅ Domain removed: ${domainId}`)
-  }
-
-  async getDomains(applicationId: string): Promise<Domain[]> {
-    debugLog(`Fetching domains for application: ${applicationId}`)
-    const app = await this.getApplication(applicationId)
-    return app.domains || []
-  }
-
   // ========================================================================
   // Deployment
   // ========================================================================
@@ -484,70 +188,112 @@ export class DokployClient {
     applicationId: string,
     title?: string,
     description?: string
-  ): Promise<Deployment | null> {
+  ): Promise<void> {
     core.info(`🚀 Deploying application: ${applicationId}`)
     debugLog('Deployment params', { applicationId, title, description })
 
-    const result = await this.post<Deployment | null>('/api/application.deploy', {
+    await this.post('/api/application.deploy', {
       applicationId,
       title,
       description
     })
-    core.info(`✅ Deployment triggered: ${applicationId}`)
-    if (!result) {
-      core.info('ℹ️ Deploy API returned no deployment object (fire-and-forget mode)')
-    }
-    return result
+    // Dokploy queues the job and returns true — the deployment row is created by the worker.
+    core.info(`✅ Deployment queued: ${applicationId}`)
   }
 
-  async getDeployment(deploymentId: string): Promise<Deployment> {
-    debugLog(`Fetching deployment: ${deploymentId}`)
-    return await this.get<Deployment>(`/api/deployment.one?deploymentId=${deploymentId}`)
+  async listApplicationDeployments(applicationId: string): Promise<Deployment[]> {
+    debugLog(`Fetching deployments for application: ${applicationId}`)
+    const result = await this.get<unknown>(
+      `/api/deployment.all?applicationId=${encodeURIComponent(applicationId)}`
+    )
+    return Array.isArray(result) ? (result as Deployment[]) : []
   }
 
-  async getDeploymentLogs(deploymentId: string): Promise<string> {
-    debugLog(`Fetching deployment logs: ${deploymentId}`)
-    const deployment = await this.getDeployment(deploymentId)
-    return deployment.logs || ''
+  async listComposeDeployments(composeId: string): Promise<Deployment[]> {
+    debugLog(`Fetching deployments for compose: ${composeId}`)
+    const result = await this.get<unknown>(
+      `/api/deployment.allByCompose?composeId=${encodeURIComponent(composeId)}`
+    )
+    return Array.isArray(result) ? (result as Deployment[]) : []
   }
 
-  async waitForDeployment(
-    deploymentId: string,
-    timeoutSeconds: number = 300,
-    pollIntervalSeconds: number = 5
-  ): Promise<Deployment> {
+  async waitForServiceDeployment(options: {
+    kind: 'application' | 'compose'
+    serviceId: string
+    previousDeploymentIds?: string[]
+    startedAfterMs?: number
+    timeoutSeconds?: number
+    pollIntervalSeconds?: number
+  }): Promise<Deployment> {
+    const timeoutSeconds = options.timeoutSeconds ?? 300
+    const pollIntervalSeconds = options.pollIntervalSeconds ?? 5
+    const previousIds = new Set(options.previousDeploymentIds || [])
+
     core.info(`⏳ Waiting for deployment to complete (timeout: ${timeoutSeconds}s)`)
     const startTime = Date.now()
     const timeoutMs = timeoutSeconds * 1000
     const pollIntervalMs = pollIntervalSeconds * 1000
+    let resolvedId: string | undefined
 
     // eslint-disable-next-line no-constant-condition
     while (true) {
-      const deployment = await this.getDeployment(deploymentId)
-      const status = deployment.status
+      const deployments =
+        options.kind === 'compose'
+          ? await this.listComposeDeployments(options.serviceId)
+          : await this.listApplicationDeployments(options.serviceId)
 
-      if (status === 'completed') {
-        core.info(`✅ Deployment completed successfully`)
-        return deployment
-      }
-
-      if (status === 'failed') {
-        core.error(`❌ Deployment failed`)
-        if (deployment.logs) {
-          core.error('Deployment logs:')
-          core.error(deployment.logs)
+      let current: Deployment | undefined
+      if (resolvedId) {
+        current = deployments.find(deployment => getDeploymentId(deployment) === resolvedId)
+      } else {
+        current = deployments.find(deployment => {
+          const id = getDeploymentId(deployment)
+          if (!id || previousIds.has(id)) {
+            return false
+          }
+          if (options.startedAfterMs) {
+            const created = Date.parse(deployment.createdAt || deployment.startedAt || '')
+            if (!Number.isNaN(created) && created < options.startedAfterMs - 2000) {
+              return false
+            }
+          }
+          return true
+        })
+        resolvedId = getDeploymentId(current)
+        if (resolvedId) {
+          core.info(`✅ Deployment ID: ${resolvedId}`)
         }
-        throw new Error('Deployment failed - check logs above for details')
       }
 
-      const elapsed = Date.now() - startTime
-      if (elapsed >= timeoutMs) {
-        throw new Error(
-          `Deployment timeout after ${timeoutSeconds}s (status: ${status})`
+      if (current) {
+        const status = current.status
+        if (isDeploymentSuccessful(status)) {
+          core.info(`✅ Deployment completed successfully`)
+          return current
+        }
+        if (isDeploymentFailed(status)) {
+          const detail = current.errorMessage || current.logs || status
+          core.error(`❌ Deployment failed`)
+          if (detail) {
+            core.error(String(detail))
+          }
+          throw new Error(`Deployment failed - check logs above for details`)
+        }
+        core.info(
+          `  Status: ${status || 'unknown'} (${Math.round((Date.now() - startTime) / 1000)}s elapsed)`
+        )
+      } else {
+        core.info(
+          `  Waiting for deployment record (${Math.round((Date.now() - startTime) / 1000)}s elapsed)`
         )
       }
 
-      core.info(`  Status: ${status} (${Math.round(elapsed / 1000)}s elapsed)`)
+      if (Date.now() - startTime >= timeoutMs) {
+        throw new Error(
+          `Deployment timeout after ${timeoutSeconds}s (status: ${current?.status || 'not created yet'})`
+        )
+      }
+
       await sleep(pollIntervalMs)
     }
   }
@@ -572,34 +318,6 @@ export class DokployClient {
   // ========================================================================
 
   /**
-   * Create a new Compose service
-   */
-  async createCompose(config: Partial<Compose>): Promise<string> {
-    core.info(`📦 Creating compose service: ${config.name}`)
-    debugLog('Compose configuration', config)
-
-    const response = await this.post<{
-      compose?: Compose
-      composeId?: string
-      id?: string
-    }>('/api/compose.create', config)
-
-    debugLog('Compose creation response', response)
-
-    const compose = response.compose || response
-    const composeId = compose.composeId || compose.id || ''
-
-    if (!composeId) {
-      core.error('❌ Failed to get compose ID from API response')
-      core.error(`Full response: ${JSON.stringify(response, null, 2)}`)
-      throw new Error('Failed to create compose service: No compose ID in response')
-    }
-
-    core.info(`✅ Created compose service: ${config.name} (ID: ${composeId})`)
-    return composeId
-  }
-
-  /**
    * Get environments for a project
    */
   async getEnvironmentsByProjectId(projectId: string): Promise<Environment[]> {
@@ -618,12 +336,17 @@ export class DokployClient {
   /**
    * Find compose service by name in an environment
    */
-  async findComposeByName(environmentId: string, composeName: string): Promise<Compose | undefined> {
+  async findComposeByName(
+    environmentId: string,
+    composeName: string
+  ): Promise<Compose | undefined> {
     debugLog(`Finding compose service by name: ${composeName} in environment ${environmentId}`)
-    
+
     // Get the environment with its services
-    const environment = await this.get<Environment>(`/api/environment.one?environmentId=${environmentId}`)
-    
+    const environment = await this.get<Environment>(
+      `/api/environment.one?environmentId=${environmentId}`
+    )
+
     // Search for compose service with matching name
     if (environment.compose && Array.isArray(environment.compose)) {
       const found = environment.compose.find(c => c.name === composeName)
@@ -632,7 +355,7 @@ export class DokployClient {
         return found
       }
     }
-    
+
     return undefined
   }
 
@@ -650,40 +373,28 @@ export class DokployClient {
   /**
    * Deploy a compose service
    */
-  async deployCompose(
-    composeId: string,
-    title?: string,
-    description?: string
-  ): Promise<Deployment> {
+  async deployCompose(composeId: string, title?: string, description?: string): Promise<void> {
     core.info(`🚀 Deploying compose service: ${composeId}`)
     debugLog('Deployment config', { composeId, title, description })
 
-    const response = await this.post<Deployment>('/api/compose.deploy', {
+    await this.post('/api/compose.deploy', {
       composeId,
       title: title || 'Automated compose deployment',
       description: description || 'Deployed via GitHub Actions'
     })
 
-    const deploymentId = response.deploymentId || response.id || ''
-    if (deploymentId) {
-      core.info(`✅ Deployment started (ID: ${deploymentId})`)
-    } else {
-      core.info(`✅ Deployment triggered`)
-    }
-
-    return response
+    core.info(`✅ Deployment queued`)
   }
 
   /**
-   * Save compose file content and environment variables
-   * Uses compose.update to set both composeFile and env
+   * Save compose file content.
+   * Uses compose.update to set composeFile.
    */
-  async saveComposeFile(composeId: string, composeFile: string, envString?: string): Promise<void> {
+  async saveComposeFile(composeId: string, composeFile: string): Promise<void> {
     core.info(`📝 Saving compose configuration for service: ${composeId}`)
     const lineCount = composeFile ? composeFile.split('\n').length : 0
-    const envCount = envString ? envString.split('\n').length : 0
-    
-    debugLog(`Saving compose file (${lineCount} lines)${envString ? ` and ${envCount} env vars` : ''}`)
+
+    debugLog(`Saving compose file (${lineCount} lines)`)
 
     const updateData: Record<string, unknown> = {
       composeId,
@@ -691,27 +402,7 @@ export class DokployClient {
       sourceType: 'raw' // Using raw compose file content
     }
 
-    if (envString) {
-      updateData.env = envString
-    }
-
     await this.post('/api/compose.update', updateData)
-    core.info(`✅ Compose configuration saved (${lineCount} lines${envString ? `, ${envCount} env vars` : ''})`)
-  }
-
-  /**
-   * Save environment variables for compose service
-   * Uses compose.update
-   */
-  async saveComposeEnvironment(composeId: string, envString: string): Promise<void> {
-    core.info(`🌍 Configuring environment variables for compose service: ${composeId}`)
-    const lineCount = envString ? envString.split('\n').length : 0
-    debugLog(`Saving ${lineCount} environment variables`)
-
-    await this.post('/api/compose.update', {
-      composeId,
-      env: envString
-    })
-    core.info(`✅ Environment variables configured (${lineCount} lines)`)
+    core.info(`✅ Compose configuration saved (${lineCount} lines)`)
   }
 }

@@ -28,27 +28,13 @@ describe('DokployClient', () => {
     })
   })
 
-  describe('resolveServerId', () => {
-    it('should return provided server ID', async () => {
-      const serverId = await client.resolveServerId('srv-123')
-      expect(serverId).toBe('srv-123')
-    })
-
-    it('should throw error if neither ID nor name provided', async () => {
-      await expect(client.resolveServerId()).rejects.toThrow(
-        'Either server-id or server-name must be provided'
-      )
-    })
-  })
-
-  // Add more tests as implementation progresses
   describe('API methods', () => {
     it('should have getAllProjects method', () => {
       expect(typeof client.getAllProjects).toBe('function')
     })
 
-    it('should have createProject method', () => {
-      expect(typeof client.createProject).toBe('function')
+    it('should have findProjectByName method', () => {
+      expect(typeof client.findProjectByName).toBe('function')
     })
 
     it('should have deployApplication method', () => {

@@ -25697,14 +25697,19 @@ class DokployClient {
     config;
     constructor(config) {
         this.config = config;
-        this.baseUrl = config.url.replace(/\/$/, ''); // Remove trailing slash
+        const { baseUrl, basicAuthHeader } = (0, helpers_1.parseDokployUrl)(config.url);
+        this.baseUrl = baseUrl;
         this.apiKey = config.apiKey;
+        const headers = {
+            accept: 'application/json',
+            'content-type': 'application/json',
+            'x-api-key': config.apiKey
+        };
+        if (basicAuthHeader) {
+            headers.Authorization = basicAuthHeader;
+        }
         this.client = new httpm.HttpClient('dokploy-github-action', undefined, {
-            headers: {
-                accept: 'application/json',
-                'content-type': 'application/json',
-                'x-api-key': config.apiKey
-            }
+            headers
         });
     }
     /**
@@ -25764,56 +25769,9 @@ class DokployClient {
         const projects = await this.getAllProjects();
         return projects.find(p => p.name === projectName);
     }
-    async createProject(name, description) {
-        core.info(`📋 Creating project: ${name}`);
-        const response = await this.post('/api/project.create', {
-            name,
-            description: description || `Automated deployment project: ${name}`
-        });
-        // Log the full response for debugging
-        (0, helpers_1.debugLog)('Project creation response', response);
-        // Dokploy API returns nested structure: { project: {...}, environment: {...} }
-        // The API automatically creates a default "production" environment
-        const project = response.project || response;
-        const projectId = project.projectId || project.id || '';
-        if (!projectId) {
-            core.error('❌ Failed to get project ID from API response');
-            core.error(`Response keys: ${Object.keys(response).join(', ')}`);
-            core.error(`Full response: ${JSON.stringify(response, null, 2)}`);
-            throw new Error('Failed to create project: No project ID in response');
-        }
-        // Extract default environment ID if created
-        let defaultEnvironmentId;
-        if (response.environment) {
-            defaultEnvironmentId = response.environment.environmentId || response.environment.id;
-            if (defaultEnvironmentId) {
-                core.info(`✅ Default environment created: ${response.environment.name} (ID: ${defaultEnvironmentId})`);
-            }
-        }
-        core.info(`✅ Created project: ${name} (ID: ${projectId})`);
-        return { projectId, defaultEnvironmentId };
-    }
     // ========================================================================
     // Environment Management
     // ========================================================================
-    async createEnvironment(projectId, environmentName) {
-        core.info(`🌍 Creating environment: ${environmentName}`);
-        const response = await this.post('/api/environment.create', {
-            projectId,
-            name: environmentName
-        });
-        (0, helpers_1.debugLog)('Environment creation response', response);
-        // Dokploy API may return nested structure or direct object
-        const environment = response.environment || response;
-        const environmentId = environment.environmentId || environment.id || '';
-        if (!environmentId) {
-            core.error('❌ Failed to get environment ID from API response');
-            core.error(`Full response: ${JSON.stringify(response, null, 2)}`);
-            throw new Error('Failed to create environment: No environment ID in response');
-        }
-        core.info(`✅ Created environment: ${environmentName} (ID: ${environmentId})`);
-        return environmentId;
-    }
     async findEnvironmentInProject(projectId, environmentName) {
         (0, helpers_1.debugLog)(`Finding environment "${environmentName}" in project ${projectId}`);
         const project = await this.getProject(projectId);
@@ -25821,88 +25779,11 @@ class DokployClient {
         return environments.find(env => env.name === environmentName);
     }
     // ========================================================================
-    // Server Management
-    // ========================================================================
-    async getAllServers() {
-        (0, helpers_1.debugLog)('Fetching all servers');
-        return await this.get('/api/server.all');
-    }
-    async findServerByName(serverName) {
-        (0, helpers_1.debugLog)(`Finding server by name: ${serverName}`);
-        const servers = await this.getAllServers();
-        // Case-insensitive lookup to handle DNS-compliant lowercase names
-        return servers.find(s => s.name.toLowerCase() === serverName.toLowerCase());
-    }
-    async resolveServerId(serverId, serverName) {
-        if (serverId) {
-            (0, helpers_1.debugLog)(`Using provided server ID: ${serverId}`);
-            return serverId;
-        }
-        if (serverName) {
-            const server = await this.findServerByName(serverName);
-            if (!server) {
-                throw new Error(`Server "${serverName}" not found`);
-            }
-            const id = server.serverId || server.id || '';
-            core.info(`✅ Found server: ${serverName} (ID: ${id})`);
-            return id;
-        }
-        throw new Error('Either server-id or server-name must be provided');
-    }
-    // ========================================================================
     // Application Management
     // ========================================================================
     async getApplication(applicationId) {
         (0, helpers_1.debugLog)(`Fetching application: ${applicationId}`);
         return await this.get(`/api/application.one?applicationId=${applicationId}`);
-    }
-    async createApplication(config) {
-        core.info(`📦 Creating application: ${config.name}`);
-        (0, helpers_1.debugLog)('Application configuration', config);
-        const response = await this.post('/api/application.create', config);
-        (0, helpers_1.debugLog)('Application creation response', response);
-        // Dokploy API may return nested structure or direct object
-        const application = response.application || response;
-        const applicationId = application.applicationId || application.id || '';
-        if (!applicationId) {
-            core.error('❌ Failed to get application ID from API response');
-            core.error(`Full response: ${JSON.stringify(response, null, 2)}`);
-            throw new Error('Failed to create application: No application ID in response');
-        }
-        core.info(`✅ Created application: ${config.name} (ID: ${applicationId})`);
-        return applicationId;
-    }
-    async updateApplication(applicationId, config) {
-        core.info(`🔄 Updating application: ${applicationId}`);
-        (0, helpers_1.debugLog)('Update configuration', config);
-        await this.post('/api/application.update', config);
-        core.info(`✅ Updated application: ${applicationId}`);
-    }
-    async saveApplicationResources(applicationId, memoryLimit, memoryReservation, cpuLimit, cpuReservation, replicas, restartPolicy) {
-        core.info(`⚙️ Updating application resources: ${applicationId}`);
-        (0, helpers_1.debugLog)('Resource configuration', {
-            memoryLimit,
-            memoryReservation,
-            cpuLimit,
-            cpuReservation,
-            replicas,
-            restartPolicy
-        });
-        const payload = { applicationId };
-        if (memoryLimit !== undefined)
-            payload.memoryLimit = memoryLimit;
-        if (memoryReservation !== undefined)
-            payload.memoryReservation = memoryReservation;
-        if (cpuLimit !== undefined)
-            payload.cpuLimit = cpuLimit;
-        if (cpuReservation !== undefined)
-            payload.cpuReservation = cpuReservation;
-        if (replicas !== undefined)
-            payload.replicas = replicas;
-        if (restartPolicy !== undefined)
-            payload.restartPolicy = restartPolicy;
-        await this.post('/api/application.saveAdvanced', payload);
-        core.info(`✅ Application resources updated`);
     }
     // ========================================================================
     // Docker Provider Configuration
@@ -25924,115 +25805,6 @@ class DokployClient {
         });
         core.info(`✅ Docker provider configured: ${dockerImage}`);
     }
-    /**
-     * Configure Docker advanced settings (volumes, group_add)
-     * Uses the mounts.create API for bind mounts/volumes
-     * These settings are passed directly to Docker/Docker Swarm
-     */
-    async saveDockerAdvancedSettings(applicationId, volumes, groupAdd) {
-        if (!volumes && !groupAdd) {
-            return; // Nothing to configure
-        }
-        core.info(`⚙️ Configuring Docker advanced settings for application: ${applicationId}`);
-        // Parse volumes and create mounts using mounts.create API
-        if (volumes) {
-            const volumeList = volumes
-                .split('\n')
-                .map(v => v.trim())
-                .filter(v => v.length > 0);
-            if (volumeList.length > 0) {
-                core.info(`  Volumes: ${volumeList.length} mount(s)`);
-                for (const vol of volumeList) {
-                    // Parse volume string: host_path:container_path[:ro]
-                    const parts = vol.split(':');
-                    if (parts.length >= 2) {
-                        const hostPath = parts[0];
-                        const mountPath = parts[1];
-                        core.info(`    - ${hostPath}:${mountPath}`);
-                        // Create mount using mounts.create API
-                        await this.post('/api/mounts.create', {
-                            serviceId: applicationId,
-                            mountPath,
-                            hostPath,
-                            type: 'bind',
-                            serviceType: 'application'
-                        });
-                    }
-                }
-            }
-        }
-        // Note: group_add is not directly supported by Dokploy API
-        // It would need to be configured via Docker Compose or custom Swarm settings
-        if (groupAdd) {
-            core.warning(`⚠️ group-add parameter is not directly supported by Dokploy API`);
-            core.warning(`   Consider using Docker Compose deployment type for full group_add support`);
-            core.info(`   Requested groups: ${groupAdd}`);
-        }
-        core.info(`✅ Docker advanced settings configured`);
-    }
-    // ========================================================================
-    // Environment Variables
-    // ========================================================================
-    async saveEnvironment(applicationId, envString) {
-        core.info(`🌍 Configuring environment variables for application: ${applicationId}`);
-        const lineCount = envString ? envString.split('\n').length : 0;
-        (0, helpers_1.debugLog)(`Saving ${lineCount} environment variables`);
-        await this.post('/api/application.saveEnvironment', {
-            applicationId,
-            env: envString
-        });
-        core.info(`✅ Environment variables configured (${lineCount} lines)`);
-    }
-    // ========================================================================
-    // Domain Management
-    // ========================================================================
-    async createDomain(applicationId, domainConfig) {
-        core.info(`🌐 Creating domain: ${domainConfig.host}`);
-        (0, helpers_1.debugLog)('Domain configuration', domainConfig);
-        const result = await this.post('/api/domain.create', {
-            applicationId,
-            ...domainConfig
-        });
-        core.info(`✅ Domain created: ${domainConfig.host} (SSL: ${domainConfig.certificateType})`);
-        return result;
-    }
-    async createComposeDomain(composeId, serviceName, domainConfig) {
-        core.info(`🌐 Creating compose domain: ${domainConfig.host} for service: ${serviceName}`);
-        (0, helpers_1.debugLog)('Compose domain configuration', { serviceName, ...domainConfig });
-        const result = await this.post('/api/domain.create', {
-            composeId,
-            domainType: 'compose',
-            serviceName,
-            ...domainConfig
-        });
-        core.info(`✅ Compose domain created: ${domainConfig.host} → ${serviceName} (SSL: ${domainConfig.certificateType})`);
-        return result;
-    }
-    async getDomainsByComposeId(composeId) {
-        (0, helpers_1.debugLog)('Getting domains for compose', { composeId });
-        const result = await this.get(`/api/domain.byComposeId?composeId=${composeId}`);
-        return result || [];
-    }
-    async updateDomain(domainId, domainConfig) {
-        core.info(`🔄 Updating domain: ${domainConfig.host}`);
-        (0, helpers_1.debugLog)('Domain update configuration', domainConfig);
-        const result = await this.post('/api/domain.update', {
-            domainId,
-            ...domainConfig
-        });
-        core.info(`✅ Domain updated: ${domainConfig.host} (SSL: ${domainConfig.certificateType})`);
-        return result;
-    }
-    async removeDomain(domainId) {
-        core.info(`🗑️ Removing domain: ${domainId}`);
-        await this.post('/api/domain.delete', { domainId });
-        core.info(`✅ Domain removed: ${domainId}`);
-    }
-    async getDomains(applicationId) {
-        (0, helpers_1.debugLog)(`Fetching domains for application: ${applicationId}`);
-        const app = await this.getApplication(applicationId);
-        return app.domains || [];
-    }
     // ========================================================================
     // Deployment
     // ========================================================================
@@ -26044,52 +25816,83 @@ class DokployClient {
     async deployApplication(applicationId, title, description) {
         core.info(`🚀 Deploying application: ${applicationId}`);
         (0, helpers_1.debugLog)('Deployment params', { applicationId, title, description });
-        const result = await this.post('/api/application.deploy', {
+        await this.post('/api/application.deploy', {
             applicationId,
             title,
             description
         });
-        core.info(`✅ Deployment triggered: ${applicationId}`);
-        if (!result) {
-            core.info('ℹ️ Deploy API returned no deployment object (fire-and-forget mode)');
-        }
-        return result;
+        // Dokploy queues the job and returns true — the deployment row is created by the worker.
+        core.info(`✅ Deployment queued: ${applicationId}`);
     }
-    async getDeployment(deploymentId) {
-        (0, helpers_1.debugLog)(`Fetching deployment: ${deploymentId}`);
-        return await this.get(`/api/deployment.one?deploymentId=${deploymentId}`);
+    async listApplicationDeployments(applicationId) {
+        (0, helpers_1.debugLog)(`Fetching deployments for application: ${applicationId}`);
+        const result = await this.get(`/api/deployment.all?applicationId=${encodeURIComponent(applicationId)}`);
+        return Array.isArray(result) ? result : [];
     }
-    async getDeploymentLogs(deploymentId) {
-        (0, helpers_1.debugLog)(`Fetching deployment logs: ${deploymentId}`);
-        const deployment = await this.getDeployment(deploymentId);
-        return deployment.logs || '';
+    async listComposeDeployments(composeId) {
+        (0, helpers_1.debugLog)(`Fetching deployments for compose: ${composeId}`);
+        const result = await this.get(`/api/deployment.allByCompose?composeId=${encodeURIComponent(composeId)}`);
+        return Array.isArray(result) ? result : [];
     }
-    async waitForDeployment(deploymentId, timeoutSeconds = 300, pollIntervalSeconds = 5) {
+    async waitForServiceDeployment(options) {
+        const timeoutSeconds = options.timeoutSeconds ?? 300;
+        const pollIntervalSeconds = options.pollIntervalSeconds ?? 5;
+        const previousIds = new Set(options.previousDeploymentIds || []);
         core.info(`⏳ Waiting for deployment to complete (timeout: ${timeoutSeconds}s)`);
         const startTime = Date.now();
         const timeoutMs = timeoutSeconds * 1000;
         const pollIntervalMs = pollIntervalSeconds * 1000;
+        let resolvedId;
         // eslint-disable-next-line no-constant-condition
         while (true) {
-            const deployment = await this.getDeployment(deploymentId);
-            const status = deployment.status;
-            if (status === 'completed') {
-                core.info(`✅ Deployment completed successfully`);
-                return deployment;
+            const deployments = options.kind === 'compose'
+                ? await this.listComposeDeployments(options.serviceId)
+                : await this.listApplicationDeployments(options.serviceId);
+            let current;
+            if (resolvedId) {
+                current = deployments.find(deployment => (0, helpers_1.getDeploymentId)(deployment) === resolvedId);
             }
-            if (status === 'failed') {
-                core.error(`❌ Deployment failed`);
-                if (deployment.logs) {
-                    core.error('Deployment logs:');
-                    core.error(deployment.logs);
+            else {
+                current = deployments.find(deployment => {
+                    const id = (0, helpers_1.getDeploymentId)(deployment);
+                    if (!id || previousIds.has(id)) {
+                        return false;
+                    }
+                    if (options.startedAfterMs) {
+                        const created = Date.parse(deployment.createdAt || deployment.startedAt || '');
+                        if (!Number.isNaN(created) && created < options.startedAfterMs - 2000) {
+                            return false;
+                        }
+                    }
+                    return true;
+                });
+                resolvedId = (0, helpers_1.getDeploymentId)(current);
+                if (resolvedId) {
+                    core.info(`✅ Deployment ID: ${resolvedId}`);
                 }
-                throw new Error('Deployment failed - check logs above for details');
             }
-            const elapsed = Date.now() - startTime;
-            if (elapsed >= timeoutMs) {
-                throw new Error(`Deployment timeout after ${timeoutSeconds}s (status: ${status})`);
+            if (current) {
+                const status = current.status;
+                if ((0, helpers_1.isDeploymentSuccessful)(status)) {
+                    core.info(`✅ Deployment completed successfully`);
+                    return current;
+                }
+                if ((0, helpers_1.isDeploymentFailed)(status)) {
+                    const detail = current.errorMessage || current.logs || status;
+                    core.error(`❌ Deployment failed`);
+                    if (detail) {
+                        core.error(String(detail));
+                    }
+                    throw new Error(`Deployment failed - check logs above for details`);
+                }
+                core.info(`  Status: ${status || 'unknown'} (${Math.round((Date.now() - startTime) / 1000)}s elapsed)`);
             }
-            core.info(`  Status: ${status} (${Math.round(elapsed / 1000)}s elapsed)`);
+            else {
+                core.info(`  Waiting for deployment record (${Math.round((Date.now() - startTime) / 1000)}s elapsed)`);
+            }
+            if (Date.now() - startTime >= timeoutMs) {
+                throw new Error(`Deployment timeout after ${timeoutSeconds}s (status: ${current?.status || 'not created yet'})`);
+            }
             await (0, helpers_1.sleep)(pollIntervalMs);
         }
     }
@@ -26108,24 +25911,6 @@ class DokployClient {
     // ========================================================================
     // Docker Compose Operations
     // ========================================================================
-    /**
-     * Create a new Compose service
-     */
-    async createCompose(config) {
-        core.info(`📦 Creating compose service: ${config.name}`);
-        (0, helpers_1.debugLog)('Compose configuration', config);
-        const response = await this.post('/api/compose.create', config);
-        (0, helpers_1.debugLog)('Compose creation response', response);
-        const compose = response.compose || response;
-        const composeId = compose.composeId || compose.id || '';
-        if (!composeId) {
-            core.error('❌ Failed to get compose ID from API response');
-            core.error(`Full response: ${JSON.stringify(response, null, 2)}`);
-            throw new Error('Failed to create compose service: No compose ID in response');
-        }
-        core.info(`✅ Created compose service: ${config.name} (ID: ${composeId})`);
-        return composeId;
-    }
     /**
      * Get environments for a project
      */
@@ -26172,280 +25957,31 @@ class DokployClient {
     async deployCompose(composeId, title, description) {
         core.info(`🚀 Deploying compose service: ${composeId}`);
         (0, helpers_1.debugLog)('Deployment config', { composeId, title, description });
-        const response = await this.post('/api/compose.deploy', {
+        await this.post('/api/compose.deploy', {
             composeId,
             title: title || 'Automated compose deployment',
             description: description || 'Deployed via GitHub Actions'
         });
-        const deploymentId = response.deploymentId || response.id || '';
-        if (deploymentId) {
-            core.info(`✅ Deployment started (ID: ${deploymentId})`);
-        }
-        else {
-            core.info(`✅ Deployment triggered`);
-        }
-        return response;
+        core.info(`✅ Deployment queued`);
     }
     /**
-     * Save compose file content and environment variables
-     * Uses compose.update to set both composeFile and env
+     * Save compose file content.
+     * Uses compose.update to set composeFile.
      */
-    async saveComposeFile(composeId, composeFile, envString) {
+    async saveComposeFile(composeId, composeFile) {
         core.info(`📝 Saving compose configuration for service: ${composeId}`);
         const lineCount = composeFile ? composeFile.split('\n').length : 0;
-        const envCount = envString ? envString.split('\n').length : 0;
-        (0, helpers_1.debugLog)(`Saving compose file (${lineCount} lines)${envString ? ` and ${envCount} env vars` : ''}`);
+        (0, helpers_1.debugLog)(`Saving compose file (${lineCount} lines)`);
         const updateData = {
             composeId,
             composeFile,
             sourceType: 'raw' // Using raw compose file content
         };
-        if (envString) {
-            updateData.env = envString;
-        }
         await this.post('/api/compose.update', updateData);
-        core.info(`✅ Compose configuration saved (${lineCount} lines${envString ? `, ${envCount} env vars` : ''})`);
-    }
-    /**
-     * Save environment variables for compose service
-     * Uses compose.update
-     */
-    async saveComposeEnvironment(composeId, envString) {
-        core.info(`🌍 Configuring environment variables for compose service: ${composeId}`);
-        const lineCount = envString ? envString.split('\n').length : 0;
-        (0, helpers_1.debugLog)(`Saving ${lineCount} environment variables`);
-        await this.post('/api/compose.update', {
-            composeId,
-            env: envString
-        });
-        core.info(`✅ Environment variables configured (${lineCount} lines)`);
+        core.info(`✅ Compose configuration saved (${lineCount} lines)`);
     }
 }
 exports.DokployClient = DokployClient;
-
-
-/***/ }),
-
-/***/ 2973:
-/***/ ((__unused_webpack_module, exports) => {
-
-"use strict";
-
-/**
- * Configuration builders for applications and domains
- */
-Object.defineProperty(exports, "__esModule", ({ value: true }));
-exports.buildApplicationConfig = buildApplicationConfig;
-exports.buildDomainConfig = buildDomainConfig;
-exports.parseEnvironmentVariables = parseEnvironmentVariables;
-function buildApplicationConfig(name, projectId, environmentId, serverId, inputs) {
-    const config = {
-        name,
-        projectId,
-        environmentId,
-        serverId,
-        applicationStatus: 'idle',
-        title: inputs.applicationTitle || name,
-        description: inputs.applicationDescription || `Automated deployment: ${name}`,
-        port: inputs.port || 8080,
-        targetPort: inputs.targetPort || 8080,
-        restartPolicy: inputs.restartPolicy || 'unless-stopped'
-    };
-    if (inputs.containerName) {
-        // Support template variables: {app}, {version}, {env}
-        let containerName = inputs.containerName;
-        // Extract version from docker image (e.g., "ghcr.io/user/app:v1.0.0" -> "v1.0.0")
-        const imageVersion = inputs.dockerImage?.split(':')[1] || 'latest';
-        // Replace template variables
-        containerName = containerName
-            .replace(/{app}/g, name)
-            .replace(/{version}/g, imageVersion)
-            .replace(/{env}/g, inputs.environmentName || 'production');
-        // Docker container name constraints:
-        // - Max 63 characters (DNS label limit)
-        // - Only alphanumeric, dash, underscore, period
-        // - Cannot start with dash or period
-        // Sanitize: replace invalid characters with dash
-        containerName = containerName
-            .replace(/[^a-zA-Z0-9._-]/g, '-')
-            .replace(/^[.-]+/, '') // Remove leading dashes/periods
-            .replace(/[.-]+$/, ''); // Remove trailing dashes/periods
-        // Truncate to 63 characters (DNS label limit)
-        const MAX_LENGTH = 63;
-        if (containerName.length > MAX_LENGTH) {
-            // Try to preserve the version suffix if present
-            const parts = containerName.split('-');
-            const lastPart = parts[parts.length - 1];
-            // If last part looks like a version (starts with v or contains dots), preserve it
-            if (lastPart && (/^v\d/.test(lastPart) || /\d+\.\d+/.test(lastPart))) {
-                const prefixMaxLength = MAX_LENGTH - lastPart.length - 1; // -1 for the dash
-                const prefix = containerName.substring(0, prefixMaxLength);
-                containerName = `${prefix}-${lastPart}`;
-            }
-            else {
-                containerName = containerName.substring(0, MAX_LENGTH);
-            }
-            // Clean up any trailing dashes from truncation
-            containerName = containerName.replace(/[.-]+$/, '');
-        }
-        config.appName = containerName;
-    }
-    // Dokploy stores memory as text and passes directly to Docker's MemoryBytes (expects bytes)
-    // Input is in MB, so convert: MB * 1024 * 1024 = bytes
-    if (inputs.memoryLimit) {
-        config.memoryLimit = inputs.memoryLimit * 1024 * 1024;
-    }
-    if (inputs.memoryReservation) {
-        config.memoryReservation = inputs.memoryReservation * 1024 * 1024;
-    }
-    // Dokploy stores CPU as text and passes directly to Docker's NanoCPUs (1 CPU = 1e9 NanoCPUs)
-    // Input is in CPU cores (e.g., 2.0), so convert: cores * 1e9 = NanoCPUs
-    if (inputs.cpuLimit) {
-        config.cpuLimit = Math.round(inputs.cpuLimit * 1e9);
-    }
-    if (inputs.cpuReservation) {
-        config.cpuReservation = Math.round(inputs.cpuReservation * 1e9);
-    }
-    if (inputs.replicas) {
-        config.replicas = inputs.replicas;
-    }
-    return config;
-}
-function buildDomainConfig(inputs) {
-    if (!inputs.domainHost) {
-        return null;
-    }
-    const applicationPort = inputs.applicationPort || inputs.targetPort || 8080;
-    return {
-        host: inputs.domainHost,
-        path: inputs.domainPath || '/',
-        port: applicationPort,
-        https: inputs.domainHttps !== false,
-        certificateType: inputs.sslCertificateType || 'letsencrypt',
-        domainType: 'application',
-        stripPath: inputs.domainStripPath || false
-    };
-}
-function parseEnvironmentVariables(inputs) {
-    // Priority: env-from-json > env-file > env
-    // Try JSON format first
-    if (inputs.envFromJson) {
-        try {
-            const obj = JSON.parse(inputs.envFromJson);
-            return Object.entries(obj)
-                .map(([key, value]) => `${key}=${value}`)
-                .join('\n');
-        }
-        catch (error) {
-            throw new Error(`Failed to parse env-from-json: ${error instanceof Error ? error.message : String(error)}`);
-        }
-    }
-    // Use direct string format
-    if (inputs.env) {
-        return inputs.env;
-    }
-    return '';
-}
-
-
-/***/ }),
-
-/***/ 3176:
-/***/ (function(__unused_webpack_module, exports, __nccwpck_require__) {
-
-"use strict";
-
-/**
- * Health check functionality
- */
-var __createBinding = (this && this.__createBinding) || (Object.create ? (function(o, m, k, k2) {
-    if (k2 === undefined) k2 = k;
-    var desc = Object.getOwnPropertyDescriptor(m, k);
-    if (!desc || ("get" in desc ? !m.__esModule : desc.writable || desc.configurable)) {
-      desc = { enumerable: true, get: function() { return m[k]; } };
-    }
-    Object.defineProperty(o, k2, desc);
-}) : (function(o, m, k, k2) {
-    if (k2 === undefined) k2 = k;
-    o[k2] = m[k];
-}));
-var __setModuleDefault = (this && this.__setModuleDefault) || (Object.create ? (function(o, v) {
-    Object.defineProperty(o, "default", { enumerable: true, value: v });
-}) : function(o, v) {
-    o["default"] = v;
-});
-var __importStar = (this && this.__importStar) || (function () {
-    var ownKeys = function(o) {
-        ownKeys = Object.getOwnPropertyNames || function (o) {
-            var ar = [];
-            for (var k in o) if (Object.prototype.hasOwnProperty.call(o, k)) ar[ar.length] = k;
-            return ar;
-        };
-        return ownKeys(o);
-    };
-    return function (mod) {
-        if (mod && mod.__esModule) return mod;
-        var result = {};
-        if (mod != null) for (var k = ownKeys(mod), i = 0; i < k.length; i++) if (k[i] !== "default") __createBinding(result, mod, k[i]);
-        __setModuleDefault(result, mod);
-        return result;
-    };
-})();
-Object.defineProperty(exports, "__esModule", ({ value: true }));
-exports.performHealthCheck = performHealthCheck;
-const core = __importStar(__nccwpck_require__(7484));
-const httpm = __importStar(__nccwpck_require__(4844));
-const helpers_1 = __nccwpck_require__(2096);
-async function performHealthCheck(deploymentUrl, inputs) {
-    if (inputs.healthCheckEnabled === false) {
-        core.info('ℹ️ Health check disabled');
-        return 'skipped';
-    }
-    if (!deploymentUrl) {
-        core.warning('⚠️ No deployment URL available, skipping health check');
-        return 'skipped';
-    }
-    const healthCheckPath = inputs.healthCheckPath || '/health';
-    const timeout = inputs.healthCheckTimeout || 60;
-    const retries = inputs.healthCheckRetries || 3;
-    const interval = inputs.healthCheckInterval || 10;
-    const fullUrl = `${deploymentUrl}${healthCheckPath}`;
-    core.info(`🏥 Performing health check: ${fullUrl}`);
-    core.info(`   Timeout: ${timeout}s, Retries: ${retries}, Interval: ${interval}s`);
-    const client = new httpm.HttpClient('dokploy-health-check');
-    const startTime = Date.now();
-    for (let attempt = 1; attempt <= retries; attempt++) {
-        try {
-            core.info(`🔍 Health check attempt ${attempt}/${retries}...`);
-            const response = await client.get(fullUrl);
-            const statusCode = response.message.statusCode || 0;
-            if (statusCode === 200) {
-                core.info(`✅ Health check passed! (HTTP ${statusCode})`);
-                return 'healthy';
-            }
-            core.warning(`⚠️ Health check returned HTTP ${statusCode}`);
-            if (attempt < retries) {
-                core.info(`⏳ Waiting ${interval}s before retry...`);
-                await (0, helpers_1.sleep)(interval * 1000);
-            }
-        }
-        catch (error) {
-            core.warning(`⚠️ Health check failed: ${error instanceof Error ? error.message : String(error)}`);
-            if (attempt < retries) {
-                core.info(`⏳ Waiting ${interval}s before retry...`);
-                await (0, helpers_1.sleep)(interval * 1000);
-            }
-        }
-        // Check timeout
-        const elapsed = (Date.now() - startTime) / 1000;
-        if (elapsed >= timeout) {
-            core.error(`❌ Health check timeout after ${elapsed}s`);
-            return 'unhealthy';
-        }
-    }
-    core.error(`❌ Health check failed after ${retries} attempts`);
-    return 'unhealthy';
-}
 
 
 /***/ }),
@@ -26460,15 +25996,8 @@ async function performHealthCheck(deploymentUrl, inputs) {
  * Version: 1.0.0
  * Author: SSanjeevi
  *
- * This action provides complete Dokploy lifecycle management including:
- * - Project and environment management
- * - Server resolution
- * - Application creation/update
- * - Docker provider configuration
- * - Environment variable management
- * - Domain and SSL configuration
- * - Health check verification with deployment failure marking
- * - Comprehensive error handling and debugging
+ * This action deploys existing Dokploy applications and compose services.
+ * Project, environment, and application resources must already exist.
  *
  * Important: If health check is enabled and fails, the deployment will be
  * marked as failed even if the container deployment succeeded. This ensures
@@ -26512,36 +26041,23 @@ exports.run = run;
 const core = __importStar(__nccwpck_require__(7484));
 const dokploy_client_1 = __nccwpck_require__(1405);
 const inputs_1 = __nccwpck_require__(8422);
-const health_check_1 = __nccwpck_require__(3176);
-const config_1 = __nccwpck_require__(2973);
 const helpers_1 = __nccwpck_require__(2096);
 const validators_1 = __nccwpck_require__(3464);
+const application_deployment_1 = __nccwpck_require__(1358);
+const compose_deployment_1 = __nccwpck_require__(7440);
 async function run() {
     try {
         core.info('🚀 Dokploy Deployment Action v1.0');
         core.info('='.repeat(60));
-        // ====================================================================
-        // Step 1: Parse and validate inputs
-        // ====================================================================
         core.startGroup('📋 Parsing and Validating Inputs');
         const inputs = (0, inputs_1.parseInputs)();
-        // Validate all inputs before proceeding
         try {
             (0, validators_1.validateAllInputs)({
                 dockerImage: inputs.dockerImage,
                 deploymentType: inputs.deploymentType,
                 applicationName: inputs.applicationName,
                 projectName: inputs.projectName,
-                environmentName: inputs.environmentName,
-                memoryLimit: inputs.memoryLimit,
-                memoryReservation: inputs.memoryReservation,
-                cpuLimit: inputs.cpuLimit,
-                cpuReservation: inputs.cpuReservation,
-                port: inputs.port,
-                targetPort: inputs.targetPort,
-                applicationPort: inputs.applicationPort,
-                replicas: inputs.replicas,
-                domainHost: inputs.domainHost
+                environmentName: inputs.environmentName
             });
             core.info('✅ All inputs validated successfully');
         }
@@ -26552,34 +26068,21 @@ async function run() {
             throw error;
         }
         core.info(`✅ Docker Image: ${inputs.dockerImage}`);
-        core.info(`✅ Environment: ${inputs.environmentName}`);
-        if (inputs.serverName)
-            core.info(`✅ Server: ${inputs.serverName}`);
-        if (inputs.domainHost)
-            core.info(`✅ Domain: ${inputs.domainHost}`);
-        if (inputs.memoryLimit)
-            core.info(`✅ Memory Limit: ${inputs.memoryLimit}MB`);
-        if (inputs.cpuLimit)
-            core.info(`✅ CPU Limit: ${inputs.cpuLimit}`);
+        if (inputs.environmentName)
+            core.info(`✅ Environment: ${inputs.environmentName}`);
         core.endGroup();
-        // ====================================================================
-        // Step 2: Initialize Dokploy client
-        // ====================================================================
         core.startGroup('🔌 Connecting to Dokploy');
         const client = new dokploy_client_1.DokployClient({
             url: inputs.dokployUrl,
             apiKey: inputs.apiKey
         });
-        core.info(`✅ Connected to: ${inputs.dokployUrl}`);
+        core.info(`✅ Connected to: ${(0, helpers_1.parseDokployUrl)(inputs.dokployUrl).baseUrl}`);
         core.endGroup();
-        // ====================================================================
-        // Route to appropriate deployment handler
-        // ====================================================================
         if (inputs.deploymentType === 'compose') {
-            await runComposeDeployment(client, inputs);
+            await (0, compose_deployment_1.runComposeDeployment)(client, inputs);
         }
         else {
-            await runApplicationDeployment(client, inputs);
+            await (0, application_deployment_1.runApplicationDeployment)(client, inputs);
         }
     }
     catch (error) {
@@ -26593,779 +26096,6 @@ async function run() {
         throw error;
     }
 }
-// ============================================================================
-// Compose Deployment Workflow
-// ============================================================================
-async function runComposeDeployment(client, inputs) {
-    core.info('📦 Starting Docker Compose deployment...');
-    core.info('='.repeat(60));
-    // ====================================================================
-    // Step 1: Ensure project exists
-    // ====================================================================
-    core.startGroup('📁 Project Management');
-    let projectId = inputs.projectId;
-    if (!projectId && inputs.projectName) {
-        const existing = await client.findProjectByName(inputs.projectName);
-        if (existing) {
-            projectId = existing.projectId || existing.id;
-            core.info(`✅ Found existing project: ${inputs.projectName} (ID: ${projectId})`);
-        }
-        else if (inputs.autoCreateResources) {
-            const result = await client.createProject(inputs.projectName, inputs.projectDescription);
-            projectId = result.projectId;
-        }
-        else {
-            throw new Error(`Project "${inputs.projectName}" not found and auto-create is disabled`);
-        }
-    }
-    if (!projectId) {
-        throw new Error('Either project-id or project-name must be provided');
-    }
-    core.setOutput('project-id', projectId);
-    core.endGroup();
-    // ====================================================================
-    // Step 2: Ensure environment exists
-    // ====================================================================
-    core.startGroup('🌍 Environment Management');
-    let environmentId = inputs.environmentId;
-    if (!environmentId && inputs.environmentName) {
-        const existing = await client.findEnvironmentInProject(projectId, inputs.environmentName);
-        if (existing) {
-            environmentId = existing.environmentId || existing.id;
-            core.info(`✅ Found existing environment: ${inputs.environmentName} (ID: ${environmentId})`);
-        }
-        else if (inputs.autoCreateResources) {
-            environmentId = await client.createEnvironment(projectId, inputs.environmentName);
-        }
-        else {
-            throw new Error(`Environment "${inputs.environmentName}" not found and auto-create is disabled`);
-        }
-    }
-    if (!environmentId) {
-        throw new Error('Either environment-id or environment-name must be provided');
-    }
-    core.setOutput('environment-id', environmentId);
-    core.endGroup();
-    // ====================================================================
-    // Step 3: Resolve server ID (optional for compose)
-    // ====================================================================
-    let serverId;
-    if (inputs.serverId || inputs.serverName) {
-        core.startGroup('🖥️ Server Resolution');
-        serverId = await client.resolveServerId(inputs.serverId, inputs.serverName);
-        core.setOutput('server-id', serverId);
-        core.endGroup();
-    }
-    // ====================================================================
-    // Step 4: Get or create compose service
-    // ====================================================================
-    core.startGroup('📦 Compose Service Management');
-    const composeName = inputs.composeName || inputs.applicationName || 'compose-service';
-    let composeId;
-    // Try to find existing compose service
-    const existing = await client.findComposeByName(environmentId, composeName);
-    if (existing) {
-        composeId = existing.composeId || existing.id;
-        core.info(`✅ Found existing compose service: ${composeName} (ID: ${composeId})`);
-    }
-    else if (inputs.autoCreateResources) {
-        // Create new compose service
-        const composeConfig = {
-            name: composeName,
-            environmentId,
-            serverId,
-            description: inputs.projectDescription || 'Deployed via GitHub Actions',
-            composeType: 'docker-compose'
-        };
-        composeId = await client.createCompose(composeConfig);
-    }
-    else {
-        throw new Error(`Compose service "${composeName}" not found and auto-create is disabled`);
-    }
-    if (!composeId) {
-        throw new Error('Failed to get or create compose service');
-    }
-    core.setOutput('application-id', composeId);
-    core.setOutput('compose-id', composeId);
-    core.endGroup();
-    // ====================================================================
-    // Step 4: Load and save compose file
-    // ====================================================================
-    core.startGroup('📝 Compose File Configuration');
-    let composeContent = '';
-    if (inputs.dokployTemplateBase64) {
-        // Decode Base64 template
-        core.info('📥 Loading Dokploy template from Base64...');
-        composeContent = Buffer.from(inputs.dokployTemplateBase64, 'base64').toString('utf-8');
-        core.info(`✅ Template decoded (${composeContent.split('\n').length} lines)`);
-    }
-    else if (inputs.composeRaw) {
-        // Use raw compose content
-        core.info('📥 Using raw compose content...');
-        composeContent = inputs.composeRaw;
-        core.info(`✅ Compose content loaded (${composeContent.split('\n').length} lines)`);
-    }
-    else if (inputs.composeFile) {
-        // Read compose file from filesystem
-        const fs = await Promise.resolve().then(() => __importStar(__nccwpck_require__(1943)));
-        const path = await Promise.resolve().then(() => __importStar(__nccwpck_require__(6928)));
-        core.info(`📥 Reading compose file: ${inputs.composeFile}`);
-        const fullPath = path.resolve(process.cwd(), inputs.composeFile);
-        try {
-            composeContent = await fs.readFile(fullPath, 'utf-8');
-            core.info(`✅ Compose file loaded (${composeContent.split('\n').length} lines)`);
-        }
-        catch (error) {
-            core.error(`❌ Failed to read compose file: ${inputs.composeFile}`);
-            throw error;
-        }
-    }
-    if (composeContent) {
-        // Parse environment variables
-        const envString = (0, config_1.parseEnvironmentVariables)(inputs);
-        // Save compose file and env in a single update call
-        await client.saveComposeFile(composeId, composeContent, envString);
-    }
-    core.endGroup();
-    // ====================================================================
-    // Step 5: Deploy compose service
-    // ====================================================================
-    core.startGroup('🚀 Deployment');
-    let deploymentId;
-    try {
-        const deploymentResult = await client.deployCompose(composeId, inputs.deploymentTitle || `Deploy compose: ${composeName}`, inputs.deploymentDescription || 'Automated compose deployment via GitHub Actions');
-        deploymentId = deploymentResult?.deploymentId || deploymentResult?.id;
-        if (deploymentId) {
-            core.setOutput('deployment-id', deploymentId);
-            core.info(`✅ Deployment ID: ${deploymentId}`);
-        }
-        else {
-            core.info('✅ Deployment triggered successfully');
-        }
-    }
-    catch (deployError) {
-        core.setOutput('deployment-status', 'failed');
-        core.error(`❌ Deployment Failed: ${deployError}`);
-        core.endGroup();
-        throw deployError;
-    }
-    core.endGroup();
-    // ====================================================================
-    // Step 6: Domain Management (Compose)
-    // ====================================================================
-    let deploymentUrl;
-    if (inputs.domainHost) {
-        core.startGroup('🌐 Domain Management');
-        const protocol = inputs.domainHttps ? 'https' : 'http';
-        // Check if domain already exists
-        const domains = await client.getDomainsByComposeId(composeId);
-        const existingDomain = domains.find((d) => d.host === inputs.domainHost && (d.port === inputs.applicationPort || !d.port));
-        const domainConfig = {
-            host: inputs.domainHost,
-            port: inputs.applicationPort,
-            https: inputs.domainHttps,
-            path: inputs.domainPath || '/',
-            certificateType: inputs.sslCertificateType
-        };
-        if (existingDomain) {
-            core.info(`━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━`);
-            core.info(`📋 Existing Domain Details:`);
-            core.info(`   Host:       ${existingDomain.host}`);
-            core.info(`   Port:       ${existingDomain.port || 'default'}`);
-            core.info(`   Path:       ${existingDomain.path || '/'}`);
-            core.info(`   Protocol:   ${existingDomain.https ? 'HTTPS' : 'HTTP'}`);
-            core.info(`   SSL:        ${existingDomain.certificateType || 'none'}`);
-            core.info(`   Service:    ${existingDomain.serviceName || 'MISSING ⚠️'}`);
-            core.info(`   Type:       Compose`);
-            core.info(`━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━`);
-            // Check if domain is missing serviceName (created before v1.2.28)
-            if (!existingDomain.serviceName) {
-                core.warning('⚠️ Domain is missing serviceName (created before v1.2.28)');
-                core.info('🔄 Recreating domain with serviceName for correct Traefik routing...');
-                const domainId = existingDomain.domainId || existingDomain.id;
-                if (domainId) {
-                    await client.removeDomain(domainId);
-                    core.info('✅ Old domain removed');
-                }
-                // Create new domain with serviceName
-                const serviceName = inputs.composeServiceName || composeName || 'app';
-                core.info(`➕ Creating new compose domain: ${domainConfig.host}:${domainConfig.port}${domainConfig.path}`);
-                core.info(`   Service: ${serviceName}`);
-                await client.createComposeDomain(composeId, serviceName, domainConfig);
-                core.info(`✅ Domain recreated successfully with serviceName: ${serviceName}`);
-                // Redeploy compose to apply new Traefik labels
-                core.info('🔄 Redeploying compose to apply Traefik labels...');
-                await client.deployCompose(composeId, `Redeploy with serviceName: ${serviceName}`, 'Apply Traefik routing labels after domain recreation');
-                core.info('✅ Compose redeployed with new domain configuration');
-            }
-            else {
-                core.info('✅ Using existing compose domain (serviceName: ' + existingDomain.serviceName + ')');
-                // Redeploy compose to ensure Traefik labels are applied
-                // Even if domain exists, labels might not be present if this is a fresh deployment
-                core.info('🔄 Redeploying compose to ensure Traefik labels are applied...');
-                await client.deployCompose(composeId, `Redeploy with existing domain: ${domainConfig.host}`, 'Ensure Traefik routing labels are applied');
-                core.info('✅ Compose redeployed with existing domain configuration');
-            }
-        }
-        else {
-            // Determine service name for routing
-            const serviceName = inputs.composeServiceName || composeName || 'app';
-            core.info(`➕ Creating new compose domain: ${domainConfig.host}:${domainConfig.port}${domainConfig.path}`);
-            core.info(`   Service: ${serviceName}`);
-            await client.createComposeDomain(composeId, serviceName, domainConfig);
-            core.info(`✅ Domain created successfully: ${domainConfig.host}`);
-            // Redeploy compose to apply Traefik labels
-            core.info('🔄 Redeploying compose to apply Traefik labels...');
-            await client.deployCompose(composeId, `Initial deployment with domain: ${domainConfig.host}`, 'Apply Traefik routing labels after domain creation');
-            core.info('✅ Compose redeployed with domain configuration');
-        }
-        deploymentUrl = `${protocol}://${domainConfig.host}`;
-        core.setOutput('deployment-url', deploymentUrl);
-        core.endGroup();
-    }
-    // ====================================================================
-    // Step 7: Wait for deployment (if enabled)
-    // ====================================================================
-    let deploymentCompleted = false;
-    if (inputs.waitForDeployment && deploymentId) {
-        core.startGroup('⏳ Waiting for Deployment');
-        // If health check is enabled, do a quick health check first
-        if (inputs.healthCheckEnabled && deploymentUrl) {
-            core.info('🔍 Quick health check before waiting for deployment...');
-            await (0, helpers_1.sleep)(5000); // Give container 5 seconds to start
-            try {
-                const quickHealthStatus = await (0, health_check_1.performHealthCheck)(deploymentUrl, {
-                    ...inputs,
-                    healthCheckRetries: 3,
-                    healthCheckInterval: 5,
-                    healthCheckTimeout: 30
-                });
-                if (quickHealthStatus === 'healthy') {
-                    core.info('✅ Application is already healthy! Skipping deployment wait.');
-                    core.setOutput('deployment-status', 'success');
-                    deploymentCompleted = true;
-                    core.endGroup();
-                }
-            }
-            catch (error) {
-                core.info('ℹ️ Quick health check did not pass, waiting for deployment...');
-            }
-        }
-        // If quick health check didn't pass, wait for deployment normally
-        if (!deploymentCompleted) {
-            try {
-                const timeout = inputs.deploymentTimeout || 300;
-                const finalDeployment = await client.waitForDeployment(deploymentId, timeout);
-                core.setOutput('deployment-status', finalDeployment.status || 'completed');
-                core.info(`✅ Deployment completed`);
-                deploymentCompleted = true;
-            }
-            catch (waitError) {
-                core.setOutput('deployment-status', 'failed');
-                core.error(`❌ Deployment wait failed: ${waitError}`);
-                core.endGroup();
-                throw waitError;
-            }
-            core.endGroup();
-        }
-    }
-    else {
-        core.setOutput('deployment-status', 'success');
-    }
-    // ====================================================================
-    // Step 8: Health check (if enabled and not already done)
-    // ====================================================================
-    if (inputs.healthCheckEnabled && deploymentUrl && !deploymentCompleted) {
-        core.startGroup('🏥 Health Check');
-        const healthStatus = await (0, health_check_1.performHealthCheck)(deploymentUrl, inputs);
-        core.setOutput('health-check-status', healthStatus);
-        core.endGroup();
-    }
-    else {
-        if (deploymentCompleted) {
-            core.info('✅ Health check already passed during quick check');
-            core.setOutput('health-check-status', 'healthy');
-        }
-        else {
-            core.setOutput('health-check-status', 'skipped');
-        }
-    }
-    // ====================================================================
-    // Summary
-    // ====================================================================
-    core.info('');
-    core.info('='.repeat(60));
-    core.info('✅ Compose deployment completed successfully!');
-    core.info('='.repeat(60));
-    core.info(`📦 Compose Service: ${composeId}`);
-    core.info(`📁 Project: ${projectId}`);
-    if (serverId)
-        core.info(`🖥️ Server: ${serverId}`);
-    core.info('='.repeat(60));
-}
-// ============================================================================
-// Application Deployment Workflow
-// ============================================================================
-async function runApplicationDeployment(client, inputs) {
-    core.info('🚀 Starting application deployment...');
-    core.info('='.repeat(60));
-    // ====================================================================
-    // Step 3: Ensure project exists
-    // ====================================================================
-    core.startGroup('📁 Project Management');
-    let projectId = inputs.projectId;
-    let defaultEnvironmentId;
-    if (!projectId && inputs.projectName) {
-        const existing = await client.findProjectByName(inputs.projectName);
-        if (existing) {
-            projectId = existing.projectId || existing.id;
-            core.info(`✅ Found existing project: ${inputs.projectName} (ID: ${projectId})`);
-        }
-        else if (inputs.autoCreateResources) {
-            const result = await client.createProject(inputs.projectName, inputs.projectDescription);
-            projectId = result.projectId;
-            defaultEnvironmentId = result.defaultEnvironmentId;
-        }
-        else {
-            throw new Error(`Project "${inputs.projectName}" not found and auto-create is disabled`);
-        }
-    }
-    if (!projectId) {
-        throw new Error('Either project-id or project-name must be provided');
-    }
-    core.setOutput('project-id', projectId);
-    core.endGroup();
-    // ====================================================================
-    // Step 4: Ensure environment exists
-    // ====================================================================
-    core.startGroup('🌍 Environment Management');
-    let environmentId = inputs.environmentId;
-    if (!environmentId && inputs.environmentName) {
-        const existing = await client.findEnvironmentInProject(projectId, inputs.environmentName);
-        if (existing) {
-            environmentId = existing.environmentId || existing.id;
-            core.info(`✅ Found existing environment: ${inputs.environmentName} (ID: ${environmentId})`);
-        }
-        else if (inputs.autoCreateResources) {
-            // Always create the requested environment, don't use default if name doesn't match
-            // The default environment created with project is named "production" by Dokploy
-            // We should only use it if the requested environment name is "production"
-            if (defaultEnvironmentId && inputs.environmentName.toLowerCase() === 'production') {
-                environmentId = defaultEnvironmentId;
-                core.info(`✅ Using default production environment created with project (ID: ${environmentId})`);
-            }
-            else {
-                environmentId = await client.createEnvironment(projectId, inputs.environmentName);
-            }
-        }
-        else {
-            throw new Error(`Environment "${inputs.environmentName}" not found and auto-create is disabled`);
-        }
-    }
-    if (!environmentId) {
-        throw new Error('Either environment-id or environment-name must be provided');
-    }
-    core.setOutput('environment-id', environmentId);
-    core.endGroup();
-    // ====================================================================
-    // Step 5: Resolve server ID
-    // ====================================================================
-    core.startGroup('🖥️ Server Resolution');
-    const serverId = await client.resolveServerId(inputs.serverId, inputs.serverName);
-    core.setOutput('server-id', serverId);
-    core.endGroup();
-    // ====================================================================
-    // Step 6: Ensure application exists
-    // ====================================================================
-    core.startGroup('📦 Application Management');
-    let applicationId = inputs.applicationId;
-    if (!applicationId && inputs.applicationName) {
-        // Try to find existing application
-        const project = await client.getProject(projectId);
-        const environment = project.environments?.find(env => (env.environmentId || env.id) === environmentId);
-        const existing = environment?.applications?.find(app => app.name === inputs.applicationName);
-        if (existing) {
-            applicationId = existing.applicationId || existing.id;
-            core.info(`✅ Found existing application: ${inputs.applicationName} (ID: ${applicationId})`);
-        }
-        else if (inputs.autoCreateResources) {
-            const config = (0, config_1.buildApplicationConfig)(inputs.applicationName, projectId, environmentId, serverId, inputs);
-            applicationId = await client.createApplication(config);
-        }
-        else {
-            throw new Error(`Application "${inputs.applicationName}" not found and auto-create is disabled`);
-        }
-    }
-    if (!applicationId) {
-        throw new Error('Either application-id or application-name must be provided');
-    }
-    core.setOutput('application-id', applicationId);
-    core.endGroup();
-    // ====================================================================
-    // Step 6.5: Update application settings (resource limits, replicas, etc.)
-    // ====================================================================
-    core.startGroup('⚙️ Application Settings Update');
-    const hasResourceSettings = inputs.memoryLimit !== undefined ||
-        inputs.memoryReservation !== undefined ||
-        inputs.cpuLimit !== undefined ||
-        inputs.cpuReservation !== undefined ||
-        inputs.replicas !== undefined ||
-        inputs.restartPolicy !== undefined;
-    if (hasResourceSettings) {
-        const updateConfig = { applicationId };
-        // Dokploy stores memory/CPU as text and passes directly to Docker Swarm API:
-        // - MemoryBytes: expects bytes (1 MB = 1048576 bytes)
-        // - NanoCPUs: expects nanosecond CPU units (1 CPU core = 1e9 NanoCPUs)
-        if (inputs.memoryLimit !== undefined) {
-            updateConfig.memoryLimit = (inputs.memoryLimit * 1024 * 1024).toString();
-            core.info(`  Memory Limit: ${inputs.memoryLimit}MB (${updateConfig.memoryLimit} bytes)`);
-        }
-        if (inputs.memoryReservation !== undefined) {
-            updateConfig.memoryReservation = (inputs.memoryReservation * 1024 * 1024).toString();
-            core.info(`  Memory Reservation: ${inputs.memoryReservation}MB (${updateConfig.memoryReservation} bytes)`);
-        }
-        if (inputs.cpuLimit !== undefined) {
-            updateConfig.cpuLimit = Math.round(inputs.cpuLimit * 1e9).toString();
-            core.info(`  CPU Limit: ${inputs.cpuLimit} cores (${updateConfig.cpuLimit} NanoCPUs)`);
-        }
-        if (inputs.cpuReservation !== undefined) {
-            updateConfig.cpuReservation = Math.round(inputs.cpuReservation * 1e9).toString();
-            core.info(`  CPU Reservation: ${inputs.cpuReservation} cores (${updateConfig.cpuReservation} NanoCPUs)`);
-        }
-        // Replicas is a number
-        if (inputs.replicas !== undefined) {
-            updateConfig.replicas = inputs.replicas;
-            core.info(`  Replicas: ${inputs.replicas}`);
-        }
-        // RestartPolicy for Docker Swarm (if provided)
-        if (inputs.restartPolicy) {
-            // Convert simple restart policy to Swarm format
-            const policyMap = {
-                'always': 'any',
-                'unless-stopped': 'any',
-                'on-failure': 'on-failure',
-                'no': 'none'
-            };
-            const swarmCondition = policyMap[inputs.restartPolicy] || 'any';
-            updateConfig.restartPolicySwarm = {
-                Condition: swarmCondition
-            };
-            core.info(`  Restart Policy: ${inputs.restartPolicy} (Swarm: ${swarmCondition})`);
-        }
-        core.info('🔄 Updating application settings...');
-        await client.updateApplication(applicationId, updateConfig);
-        core.info('✅ Application settings updated');
-    }
-    else {
-        core.info('ℹ️ No resource settings to update');
-    }
-    core.endGroup();
-    // ====================================================================
-    // Step 7: Configure Docker provider
-    // ====================================================================
-    core.startGroup('🐳 Docker Provider Configuration');
-    await client.saveDockerProvider(applicationId, inputs.dockerImage, inputs.registryUrl, inputs.registryUsername, inputs.registryPassword);
-    core.endGroup();
-    // ====================================================================
-    // Step 7.5: Configure Docker advanced settings (volumes, group_add)
-    // ====================================================================
-    if (inputs.volumes || inputs.groupAdd) {
-        core.startGroup('⚙️ Docker Advanced Settings');
-        await client.saveDockerAdvancedSettings(applicationId, inputs.volumes, inputs.groupAdd);
-        core.endGroup();
-    }
-    // ====================================================================
-    // Step 8: Configure environment variables
-    // ====================================================================
-    core.startGroup('🌍 Environment Variables Configuration');
-    const envString = (0, config_1.parseEnvironmentVariables)(inputs);
-    if (envString) {
-        await client.saveEnvironment(applicationId, envString);
-    }
-    else {
-        core.info('ℹ️ No environment variables to configure');
-    }
-    core.endGroup();
-    // ====================================================================
-    // Step 9: Configure domain (if enabled)
-    // ====================================================================
-    let deploymentUrl;
-    const domainConfig = (0, config_1.buildDomainConfig)(inputs);
-    if (domainConfig) {
-        core.startGroup('🌐 Domain Configuration');
-        const existingDomains = await client.getDomains(applicationId);
-        // Find all exact matches (same host, port, and path) to prevent duplicates
-        const exactMatches = existingDomains.filter(d => d.host === domainConfig.host &&
-            d.port === domainConfig.port &&
-            d.path === domainConfig.path);
-        // Remove duplicates if more than one exists for the same configuration
-        if (exactMatches.length > 1) {
-            core.warning(`⚠️ Found ${exactMatches.length} duplicate domains for ${domainConfig.host}:${domainConfig.port}${domainConfig.path}`);
-            core.info('🧹 Removing duplicates, keeping only the latest one...');
-            // Sort by creation date and keep the latest
-            const sorted = exactMatches.sort((a, b) => {
-                const dateA = new Date(a.createdAt || 0).getTime();
-                const dateB = new Date(b.createdAt || 0).getTime();
-                return dateB - dateA; // Descending order (latest first)
-            });
-            // Remove all except the first (latest) one
-            for (let i = 1; i < sorted.length; i++) {
-                const domainId = sorted[i].domainId || sorted[i].id || '';
-                core.info(`  Removing duplicate domain: ${sorted[i].host} (ID: ${domainId})`);
-                await client.removeDomain(domainId);
-                await (0, helpers_1.sleep)(1000); // Small delay between deletions
-            }
-            core.info(`✅ Cleaned up ${sorted.length - 1} duplicate domains`);
-        }
-        const existingDomain = exactMatches.length > 0 ? exactMatches[0] : null;
-        if (existingDomain) {
-            if (inputs.forceDomainRecreation) {
-                // Force recreation: delete and create new
-                const domainId = existingDomain.domainId || existingDomain.id || '';
-                core.info(`🔄 Force recreating domain: ${domainConfig.host}`);
-                await client.removeDomain(domainId);
-                await (0, helpers_1.sleep)(2000);
-                await client.createDomain(applicationId, domainConfig);
-                core.info(`✅ Domain recreated: ${domainConfig.host}`);
-            }
-            else {
-                // Update existing domain with new configuration
-                const domainId = existingDomain.domainId || existingDomain.id || '';
-                core.info(`ℹ️ Domain already exists: ${domainConfig.host}, updating configuration...`);
-                await client.updateDomain(domainId, domainConfig);
-                core.info(`✅ Domain configuration updated: ${domainConfig.host}`);
-            }
-        }
-        else {
-            // Create new domain - only if it doesn't exist
-            core.info(`➕ Creating new domain: ${domainConfig.host}:${domainConfig.port}${domainConfig.path}`);
-            await client.createDomain(applicationId, domainConfig);
-            core.info(`✅ Domain created successfully: ${domainConfig.host}`);
-        }
-        deploymentUrl = domainConfig.https
-            ? `https://${domainConfig.host}`
-            : `http://${domainConfig.host}`;
-        core.setOutput('deployment-url', deploymentUrl);
-        core.endGroup();
-    }
-    // ====================================================================
-    // Step 10: Cleanup old containers (if enabled)
-    // ====================================================================
-    if (inputs.cleanupOldContainers) {
-        core.startGroup('🧹 Cleanup Old Containers');
-        await client.stopApplication(applicationId);
-        core.info('⏳ Waiting 15 seconds for containers to stop...');
-        await (0, helpers_1.sleep)(15000);
-        core.endGroup();
-    }
-    // ====================================================================
-    // Step 11: Deploy application
-    // ====================================================================
-    core.startGroup('🚀 Deployment');
-    let deploymentId;
-    try {
-        const deploymentResult = await client.deployApplication(applicationId, inputs.deploymentTitle || `Deploy ${inputs.dockerImage}`, inputs.deploymentDescription || 'Automated deployment via GitHub Actions');
-        // Capture deployment ID for tracking (API may return null for fire-and-forget deploys)
-        deploymentId = deploymentResult?.deploymentId || deploymentResult?.id;
-        if (deploymentId) {
-            core.setOutput('deployment-id', deploymentId);
-            core.info(`✅ Deployment ID: ${deploymentId}`);
-        }
-        else {
-            core.info('✅ Deployment triggered successfully (no deployment ID returned)');
-        }
-    }
-    catch (deployError) {
-        core.setOutput('deployment-status', 'failed');
-        // Extract and display detailed error information
-        const errorMessage = deployError instanceof Error ? deployError.message : String(deployError);
-        core.error('❌ Deployment Failed');
-        core.error('='.repeat(60));
-        core.error('');
-        // Parse common Dokploy API errors
-        if (errorMessage.includes('invalid memory value')) {
-            const match = errorMessage.match(/invalid memory value (\d+): Must be at least (\d+)/);
-            if (match) {
-                core.error(`Memory Configuration Error:`);
-                core.error(`  Current value: ${match[1]}MB`);
-                core.error(`  Minimum required: ${match[2]}MB (4MiB)`);
-                core.error('');
-                core.error(`💡 Fix: Set memory-limit and memory-reservation to at least 4MB`);
-                core.error(`   Recommended values: 128MB, 256MB, 512MB, 1024MB`);
-            }
-            else {
-                core.error(`Memory value is too low. Dokploy requires at least 4MiB.`);
-                core.error(`💡 Set memory-limit to at least 4MB (recommended: 128MB or higher)`);
-            }
-        }
-        else if (errorMessage.includes('invalid cpu value')) {
-            const match = errorMessage.match(/invalid cpu value ([0-9.e-]+): Must be at least ([0-9.]+)/);
-            if (match) {
-                core.error(`CPU Configuration Error:`);
-                core.error(`  Current value: ${match[1]}`);
-                core.error(`  Minimum required: ${match[2]}`);
-                core.error('');
-                core.error(`💡 Fix: Set cpu-limit and cpu-reservation to at least 0.001`);
-                core.error(`   Common values: 0.1 (100m), 0.25 (250m), 0.5 (500m), 1.0 (1 CPU)`);
-            }
-            else {
-                core.error(`CPU value is too low. Dokploy requires at least 0.001.`);
-                core.error(`💡 Set cpu-limit to at least 0.001 (recommended: 0.1 or higher)`);
-            }
-        }
-        else if (errorMessage.includes('name must be valid as a DNS name component')) {
-            core.error(`DNS Name Validation Error:`);
-            core.error(`  One or more names (application, project, or environment) are invalid.`);
-            core.error('');
-            core.error(`DNS names must:`);
-            core.error(`  • Contain only lowercase letters, numbers, and hyphens`);
-            core.error(`  • Start and end with a letter or number`);
-            core.error(`  • Be 63 characters or less`);
-            core.error('');
-            core.error(`💡 Fix: Check your application-name, project-name, and environment-name inputs`);
-            if (inputs.applicationName) {
-                core.error(`   Application: "${inputs.applicationName}"`);
-            }
-            if (inputs.projectName) {
-                core.error(`   Project: "${inputs.projectName}"`);
-            }
-            if (inputs.environmentName) {
-                core.error(`   Environment: "${inputs.environmentName}"`);
-            }
-        }
-        else {
-            // Generic error
-            core.error(`Error: ${errorMessage}`);
-        }
-        core.error('');
-        core.error('='.repeat(60));
-        core.endGroup();
-        throw deployError;
-    }
-    core.endGroup();
-    // ====================================================================
-    // Step 12: Wait for deployment (if enabled)
-    // ====================================================================
-    let deploymentCompleted = false;
-    if (inputs.waitForDeployment && deploymentId) {
-        core.startGroup('⏳ Waiting for Deployment');
-        // If health check is enabled, do a quick health check first
-        // This can save significant time if the app is already healthy
-        if (inputs.healthCheckEnabled && deploymentUrl) {
-            core.info('🔍 Quick health check before waiting for deployment...');
-            await (0, helpers_1.sleep)(5000); // Give container 5 seconds to start
-            try {
-                const quickHealthStatus = await (0, health_check_1.performHealthCheck)(deploymentUrl, {
-                    ...inputs,
-                    healthCheckRetries: 3,
-                    healthCheckInterval: 5,
-                    healthCheckTimeout: 30
-                });
-                if (quickHealthStatus === 'healthy') {
-                    core.info('✅ Application is already healthy! Skipping deployment wait.');
-                    core.setOutput('deployment-status', 'success');
-                    deploymentCompleted = true;
-                    core.endGroup();
-                }
-            }
-            catch (error) {
-                core.info('ℹ️ Quick health check did not pass, waiting for deployment...');
-            }
-        }
-        // If quick health check didn't pass, wait for deployment normally
-        if (!deploymentCompleted) {
-            try {
-                const timeout = inputs.deploymentTimeout || 300;
-                const finalDeployment = await client.waitForDeployment(deploymentId, timeout);
-                core.setOutput('deployment-status', finalDeployment.status || 'completed');
-                core.info(`✅ Deployment completed in ${Math.round(((Date.now() - Date.parse(finalDeployment.startedAt || '')) / 1000))}s`);
-                deploymentCompleted = true;
-            }
-            catch (waitError) {
-                core.setOutput('deployment-status', 'failed');
-                const errorMessage = waitError instanceof Error ? waitError.message : String(waitError);
-                core.error(`❌ Deployment wait failed: ${errorMessage}`);
-                // Try to get deployment logs for debugging
-                if (deploymentId) {
-                    try {
-                        const logs = await client.getDeploymentLogs(deploymentId);
-                        if (logs) {
-                            core.error('');
-                            core.error('Deployment Logs:');
-                            core.error('='.repeat(60));
-                            core.error(logs);
-                            core.error('='.repeat(60));
-                        }
-                    }
-                    catch (logError) {
-                        core.warning('Could not retrieve deployment logs');
-                    }
-                }
-                core.endGroup();
-                throw waitError;
-            }
-            core.endGroup();
-        }
-    }
-    else if (inputs.waitForDeployment && !deploymentId) {
-        core.warning('⚠️ wait-for-deployment enabled but no deployment ID available, skipping wait');
-        core.setOutput('deployment-status', 'success');
-    }
-    else {
-        // Not waiting for deployment, assume success
-        core.setOutput('deployment-status', 'success');
-    }
-    // ====================================================================
-    // Step 13: Health check (if enabled and not already done)
-    // ====================================================================
-    if (inputs.healthCheckEnabled && deploymentUrl && !deploymentCompleted) {
-        // Only do full health check if we didn't already verify health in quick check
-        core.startGroup('🏥 Health Check');
-        const healthStatus = await (0, health_check_1.performHealthCheck)(deploymentUrl, inputs);
-        core.setOutput('health-check-status', healthStatus);
-        if (healthStatus === 'unhealthy') {
-            core.setOutput('deployment-status', 'failed');
-            if (inputs.failOnHealthCheckError) {
-                core.setFailed('❌ Deployment failed: Health check returned unhealthy status');
-                core.error('The deployment completed but the application failed health checks.');
-                core.error('This indicates the new version is not functioning correctly.');
-                core.endGroup();
-                throw new Error('Health check failed - deployment marked as failed');
-            }
-            else {
-                core.warning('⚠️ Health check failed but fail-on-health-check-error is disabled');
-                core.warning('The deployment is marked as failed but the workflow will continue.');
-                core.warning('Please verify the application manually.');
-            }
-        }
-        core.endGroup();
-    }
-    else {
-        if (deploymentCompleted) {
-            core.info('✅ Health check already passed during quick check');
-            core.setOutput('health-check-status', 'healthy');
-        }
-        else {
-            core.setOutput('health-check-status', 'skipped');
-        }
-    }
-    // ====================================================================
-    // Step 14: Summary
-    // ====================================================================
-    core.info('');
-    core.info('='.repeat(60));
-    core.info('✅ Deployment completed successfully!');
-    core.info('='.repeat(60));
-    core.info(`📦 Application: ${applicationId}`);
-    core.info(`📁 Project: ${projectId}`);
-    core.info(`🌍 Environment: ${environmentId}`);
-    core.info(`🖥️ Server: ${serverId}`);
-    if (deploymentUrl) {
-        core.info(`🌐 URL: ${deploymentUrl}`);
-    }
-    core.info('='.repeat(60));
-}
-// Run the action if this is the main module
 if (require.main === require.cache[eval('__filename')]) {
     run();
 }
@@ -27507,9 +26237,15 @@ function parseInputs() {
             throw new Error('Compose deployment requires compose-file, compose-raw, or dokploy-template-base64');
         }
     }
-    // Validate URL format
+    // Validate URL format and mask optional Basic Auth credentials
     try {
-        new URL(dokployUrl);
+        const parsedUrl = new URL(dokployUrl);
+        if (parsedUrl.username) {
+            (0, helpers_1.sanitizeSecret)(decodeURIComponent(parsedUrl.username));
+        }
+        if (parsedUrl.password) {
+            (0, helpers_1.sanitizeSecret)(decodeURIComponent(parsedUrl.password));
+        }
     }
     catch (error) {
         core.error('❌ Invalid dokploy-url format');
@@ -27527,41 +26263,6 @@ function parseInputs() {
     if (registryPassword) {
         (0, helpers_1.sanitizeSecret)(registryPassword);
     }
-    // Parse inputs
-    const volumes = (0, helpers_1.parseOptionalStringInput)('volumes');
-    const groupAdd = (0, helpers_1.parseOptionalStringInput)('group-add');
-    // Validate Docker advanced settings with deployment type
-    if (deploymentType === 'application' && (volumes || groupAdd)) {
-        core.error('❌ Docker advanced settings (volumes, group-add) are not supported with application deployment');
-        core.error('');
-        core.error('The following parameters are not supported by Dokploy API for application deployments:');
-        if (volumes)
-            core.error('  • volumes');
-        if (groupAdd)
-            core.error('  • group-add');
-        core.error('');
-        core.error('These settings require Docker Compose deployment for full control.');
-        core.error('');
-        core.error('To fix this, switch to Docker Compose deployment:');
-        core.error('');
-        core.error('  with:');
-        core.error('    deployment-type: compose');
-        core.error('    compose-file: docker-compose.yml');
-        core.error('    # OR');
-        core.error('    compose-raw: |');
-        core.error('      version: "3.8"');
-        core.error('      services:');
-        core.error('        app:');
-        core.error('          image: your-image:tag');
-        core.error('          volumes:');
-        core.error('            - /var/run/docker.sock:/var/run/docker.sock');
-        core.error('          group_add:');
-        core.error('            - 988');
-        core.error('');
-        core.error('Documentation: https://docs.dokploy.com/docs/core/docker-compose');
-        core.error('');
-        throw new Error('Docker advanced settings (volumes, group-add) require compose deployment type');
-    }
     return {
         // Core
         dokployUrl,
@@ -27573,53 +26274,19 @@ function parseInputs() {
         composeFile: (0, helpers_1.parseOptionalStringInput)('compose-file'),
         composeRaw: (0, helpers_1.parseOptionalStringInput)('compose-raw'),
         composeName: (0, helpers_1.parseOptionalStringInput)('compose-name'),
-        composeServiceName: (0, helpers_1.parseOptionalStringInput)('compose-service-name'),
         dokployTemplateBase64: (0, helpers_1.parseOptionalStringInput)('dokploy-template-base64'),
         // Project & Environment
         projectId: (0, helpers_1.parseOptionalStringInput)('project-id'),
         projectName: (0, helpers_1.parseOptionalStringInput)('project-name'),
-        projectDescription: (0, helpers_1.parseOptionalStringInput)('project-description'),
         environmentId: (0, helpers_1.parseOptionalStringInput)('environment-id'),
         environmentName: (0, helpers_1.parseOptionalStringInput)('environment-name') || 'production',
-        autoCreateResources: (0, helpers_1.parseBooleanInput)((0, helpers_1.parseOptionalStringInput)('auto-create-resources')) ?? true,
         // Application
         applicationId: (0, helpers_1.parseOptionalStringInput)('application-id'),
         applicationName: (0, helpers_1.parseOptionalStringInput)('application-name'),
-        applicationTitle: (0, helpers_1.parseOptionalStringInput)('application-title'),
-        applicationDescription: (0, helpers_1.parseOptionalStringInput)('application-description'),
-        containerName: (0, helpers_1.parseOptionalStringInput)('container-name'),
-        // Server
-        serverId: (0, helpers_1.parseOptionalStringInput)('server-id'),
-        serverName: (0, helpers_1.parseOptionalStringInput)('server-name'),
-        // Resources
-        memoryLimit: (0, helpers_1.parseIntInput)((0, helpers_1.parseOptionalStringInput)('memory-limit'), 'memory-limit'),
-        memoryReservation: (0, helpers_1.parseIntInput)((0, helpers_1.parseOptionalStringInput)('memory-reservation'), 'memory-reservation'),
-        cpuLimit: (0, helpers_1.parseCpuLimit)((0, helpers_1.parseOptionalStringInput)('cpu-limit')),
-        cpuReservation: (0, helpers_1.parseCpuLimit)((0, helpers_1.parseOptionalStringInput)('cpu-reservation')),
-        port: (0, helpers_1.parseIntInput)((0, helpers_1.parseOptionalStringInput)('port'), 'port'),
-        targetPort: (0, helpers_1.parseIntInput)((0, helpers_1.parseOptionalStringInput)('target-port'), 'target-port'),
-        restartPolicy: (0, helpers_1.parseOptionalStringInput)('restart-policy'),
-        // Docker Advanced
-        volumes,
-        groupAdd,
-        // Scaling
-        replicas: (0, helpers_1.parseIntInput)((0, helpers_1.parseOptionalStringInput)('replicas'), 'replicas'),
         // Registry
         registryUrl: (0, helpers_1.parseOptionalStringInput)('registry-url'),
         registryUsername: (0, helpers_1.parseOptionalStringInput)('registry-username'),
         registryPassword,
-        // Environment Variables
-        env: (0, helpers_1.parseOptionalStringInput)('env'),
-        envFile: (0, helpers_1.parseOptionalStringInput)('env-file'),
-        envFromJson: (0, helpers_1.parseOptionalStringInput)('env-from-json'),
-        // Domain & SSL
-        domainHost: (0, helpers_1.parseOptionalStringInput)('domain-host'),
-        domainPath: (0, helpers_1.parseOptionalStringInput)('domain-path'),
-        applicationPort: (0, helpers_1.parseIntInput)((0, helpers_1.parseOptionalStringInput)('application-port'), 'application-port'),
-        domainHttps: (0, helpers_1.parseBooleanInput)((0, helpers_1.parseOptionalStringInput)('domain-https')) ?? true,
-        sslCertificateType: (0, helpers_1.parseOptionalStringInput)('ssl-certificate-type'),
-        domainStripPath: (0, helpers_1.parseBooleanInput)((0, helpers_1.parseOptionalStringInput)('domain-strip-path')),
-        forceDomainRecreation: (0, helpers_1.parseBooleanInput)((0, helpers_1.parseOptionalStringInput)('force-domain-recreation')),
         // Deployment
         deploymentTitle: (0, helpers_1.parseOptionalStringInput)('deployment-title'),
         deploymentDescription: (0, helpers_1.parseOptionalStringInput)('deployment-description'),
@@ -27689,7 +26356,10 @@ Object.defineProperty(exports, "__esModule", ({ value: true }));
 exports.parseIntInput = parseIntInput;
 exports.parseBooleanInput = parseBooleanInput;
 exports.parseOptionalStringInput = parseOptionalStringInput;
-exports.parseCpuLimit = parseCpuLimit;
+exports.parseDokployUrl = parseDokployUrl;
+exports.getDeploymentId = getDeploymentId;
+exports.isDeploymentSuccessful = isDeploymentSuccessful;
+exports.isDeploymentFailed = isDeploymentFailed;
 exports.sleep = sleep;
 exports.debugLog = debugLog;
 exports.logApiRequest = logApiRequest;
@@ -27721,30 +26391,43 @@ function parseOptionalStringInput(key) {
     const value = core.getInput(key, { required: false });
     return value && value.trim() !== '' ? value.trim() : undefined;
 }
-function parseCpuLimit(value) {
-    if (!value || value === '') {
+/**
+ * Split optional HTTP Basic credentials from dokploy-url.
+ * @actions/http-client ignores URL userinfo, so we convert it to an Authorization header.
+ */
+function parseDokployUrl(url) {
+    const parsed = new URL(url);
+    const username = decodeURIComponent(parsed.username);
+    const password = decodeURIComponent(parsed.password);
+    parsed.username = '';
+    parsed.password = '';
+    const baseUrl = parsed.toString().replace(/\/$/, '');
+    if (!username && !password) {
+        return { baseUrl };
+    }
+    return {
+        baseUrl,
+        basicAuthHeader: `Basic ${Buffer.from(`${username}:${password}`).toString('base64')}`
+    };
+}
+function getDeploymentId(deployment) {
+    if (!deployment || typeof deployment !== 'object') {
         return undefined;
     }
-    // CPU limits can be:
-    // - Decimal values: 0.5, 1.0, 2.5
-    // - Integer values: 1, 2, 4
-    // - Millicpu values with 'm' suffix: 500m, 1000m (convert to decimal)
-    const cleanValue = value.toString().trim();
-    // Handle millicpu format (e.g., "500m" = 0.5 CPU)
-    if (cleanValue.endsWith('m') || cleanValue.endsWith('M')) {
-        const milliValue = parseInt(cleanValue.slice(0, -1), 10);
-        if (isNaN(milliValue)) {
-            throw new Error(`CPU limit must be a valid number, got: ${value}`);
-        }
-        // Convert millicpu to decimal (1000m = 1.0 CPU)
-        return milliValue / 1000;
+    const record = deployment;
+    if (typeof record.deploymentId === 'string' && record.deploymentId.length > 0) {
+        return record.deploymentId;
     }
-    // Parse as decimal number
-    const parsed = parseFloat(cleanValue);
-    if (isNaN(parsed)) {
-        throw new Error(`CPU limit must be a valid number, got: ${value}`);
+    if (typeof record.id === 'string' && record.id.length > 0) {
+        return record.id;
     }
-    return parsed;
+    return undefined;
+}
+function isDeploymentSuccessful(status) {
+    return status === 'done' || status === 'completed';
+}
+function isDeploymentFailed(status) {
+    return status === 'error' || status === 'failed';
 }
 function sleep(ms) {
     return new Promise(resolve => setTimeout(resolve, ms));
@@ -27807,8 +26490,6 @@ function sanitizeSecret(value) {
  * and provide helpful error messages to users.
  *
  * Based on Dokploy API constraints:
- * - Memory: Minimum 4MiB (not 128MB or 256MB)
- * - CPU: Minimum 0.001 (not 1e-09)
  * - Names: Must be valid DNS names
  */
 var __createBinding = (this && this.__createBinding) || (Object.create ? (function(o, m, k, k2) {
@@ -27846,12 +26527,8 @@ var __importStar = (this && this.__importStar) || (function () {
 })();
 Object.defineProperty(exports, "__esModule", ({ value: true }));
 exports.ValidationError = void 0;
-exports.validateMemory = validateMemory;
-exports.validateCpu = validateCpu;
 exports.validateDnsName = validateDnsName;
 exports.validatePort = validatePort;
-exports.validateReplicas = validateReplicas;
-exports.validateDomainHost = validateDomainHost;
 exports.validateDockerImage = validateDockerImage;
 exports.validateAllInputs = validateAllInputs;
 exports.formatValidationError = formatValidationError;
@@ -27872,38 +26549,6 @@ class ValidationError extends Error {
     }
 }
 exports.ValidationError = ValidationError;
-/**
- * Validate memory value (in MB)
- * Dokploy requires minimum 4MiB (4 MB)
- */
-function validateMemory(value, fieldName) {
-    if (value === undefined) {
-        return; // Optional field
-    }
-    const MIN_MEMORY_MB = 4;
-    if (value < MIN_MEMORY_MB) {
-        throw new ValidationError(`${fieldName} must be at least ${MIN_MEMORY_MB}MiB (got ${value}MB)`, fieldName, value, `Set ${fieldName} to at least ${MIN_MEMORY_MB}MB. Common values: 128MB, 256MB, 512MB, 1024MB`);
-    }
-    if (value > 32768) {
-        core.warning(`⚠️ ${fieldName} is very high (${value}MB). Consider if this is intentional.`);
-    }
-}
-/**
- * Validate CPU value
- * Dokploy requires minimum 0.001 (1 millicpu)
- */
-function validateCpu(value, fieldName) {
-    if (value === undefined) {
-        return; // Optional field
-    }
-    const MIN_CPU = 0.001;
-    if (value < MIN_CPU) {
-        throw new ValidationError(`${fieldName} must be at least ${MIN_CPU} (got ${value})`, fieldName, value, `Set ${fieldName} to at least ${MIN_CPU}. Common values: 0.1 (100m), 0.25 (250m), 0.5 (500m), 1.0 (1 CPU), 2.0 (2 CPUs)`);
-    }
-    if (value > 64) {
-        core.warning(`⚠️ ${fieldName} is very high (${value} CPUs). Consider if this is intentional.`);
-    }
-}
 /**
  * Validate DNS name component
  * Must follow RFC 1123: lowercase alphanumeric and hyphens, cannot start/end with hyphen
@@ -27935,7 +26580,11 @@ function validateDnsName(value, fieldName) {
         if (/[A-Z]/.test(value)) {
             issues.push('contains uppercase letters (must be lowercase)');
         }
-        throw new ValidationError(`${fieldName} must be a valid DNS name: ${issues.join(', ')}`, fieldName, value, `Convert "${value}" to a valid DNS name. Example: "${value.toLowerCase().replace(/[^a-z0-9-]/g, '-').replace(/^-+|-+$/g, '').substring(0, 63)}"`);
+        throw new ValidationError(`${fieldName} must be a valid DNS name: ${issues.join(', ')}`, fieldName, value, `Convert "${value}" to a valid DNS name. Example: "${value
+            .toLowerCase()
+            .replace(/[^a-z0-9-]/g, '-')
+            .replace(/^-+|-+$/g, '')
+            .substring(0, 63)}"`);
     }
 }
 /**
@@ -27947,33 +26596,6 @@ function validatePort(value, fieldName) {
     }
     if (value < 1 || value > 65535) {
         throw new ValidationError(`${fieldName} must be between 1 and 65535 (got ${value})`, fieldName, value, 'Use a valid port number between 1 and 65535. Common ports: 80 (HTTP), 443 (HTTPS), 3000, 8080');
-    }
-}
-/**
- * Validate replica count
- */
-function validateReplicas(value, fieldName) {
-    if (value === undefined) {
-        return; // Optional field
-    }
-    if (value < 0) {
-        throw new ValidationError(`${fieldName} must be non-negative (got ${value})`, fieldName, value, 'Set replicas to 0 to stop the application, or 1+ to run containers');
-    }
-    if (value > 100) {
-        core.warning(`⚠️ ${fieldName} is very high (${value}). This will create ${value} containers. Consider if this is intentional.`);
-    }
-}
-/**
- * Validate domain host format
- */
-function validateDomainHost(value, fieldName) {
-    if (!value) {
-        return; // Optional field
-    }
-    // Basic domain validation (not exhaustive, but catches common errors)
-    const domainRegex = /^([a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?\.)+[a-z]{2,}$/i;
-    if (!domainRegex.test(value)) {
-        throw new ValidationError(`${fieldName} is not a valid domain name`, fieldName, value, 'Use a valid fully-qualified domain name. Example: app.example.com, api.mydomain.com');
     }
 }
 /**
@@ -28028,69 +26650,6 @@ function validateAllInputs(inputs) {
         if (e instanceof ValidationError)
             errors.push(e);
     }
-    try {
-        validateMemory(inputs.memoryLimit, 'memory-limit');
-    }
-    catch (e) {
-        if (e instanceof ValidationError)
-            errors.push(e);
-    }
-    try {
-        validateMemory(inputs.memoryReservation, 'memory-reservation');
-    }
-    catch (e) {
-        if (e instanceof ValidationError)
-            errors.push(e);
-    }
-    try {
-        validateCpu(inputs.cpuLimit, 'cpu-limit');
-    }
-    catch (e) {
-        if (e instanceof ValidationError)
-            errors.push(e);
-    }
-    try {
-        validateCpu(inputs.cpuReservation, 'cpu-reservation');
-    }
-    catch (e) {
-        if (e instanceof ValidationError)
-            errors.push(e);
-    }
-    try {
-        validatePort(inputs.port, 'port');
-    }
-    catch (e) {
-        if (e instanceof ValidationError)
-            errors.push(e);
-    }
-    try {
-        validatePort(inputs.targetPort, 'target-port');
-    }
-    catch (e) {
-        if (e instanceof ValidationError)
-            errors.push(e);
-    }
-    try {
-        validatePort(inputs.applicationPort, 'application-port');
-    }
-    catch (e) {
-        if (e instanceof ValidationError)
-            errors.push(e);
-    }
-    try {
-        validateReplicas(inputs.replicas, 'replicas');
-    }
-    catch (e) {
-        if (e instanceof ValidationError)
-            errors.push(e);
-    }
-    try {
-        validateDomainHost(inputs.domainHost, 'domain-host');
-    }
-    catch (e) {
-        if (e instanceof ValidationError)
-            errors.push(e);
-    }
     if (errors.length > 0) {
         core.error('❌ Validation failed with the following errors:');
         core.error('');
@@ -28115,6 +26674,493 @@ function formatValidationError(error) {
         message += `   💡 Suggestion: ${error.suggestion}\n`;
     }
     return message;
+}
+
+
+/***/ }),
+
+/***/ 1358:
+/***/ (function(__unused_webpack_module, exports, __nccwpck_require__) {
+
+"use strict";
+
+/**
+ * Application deployment workflow.
+ */
+var __createBinding = (this && this.__createBinding) || (Object.create ? (function(o, m, k, k2) {
+    if (k2 === undefined) k2 = k;
+    var desc = Object.getOwnPropertyDescriptor(m, k);
+    if (!desc || ("get" in desc ? !m.__esModule : desc.writable || desc.configurable)) {
+      desc = { enumerable: true, get: function() { return m[k]; } };
+    }
+    Object.defineProperty(o, k2, desc);
+}) : (function(o, m, k, k2) {
+    if (k2 === undefined) k2 = k;
+    o[k2] = m[k];
+}));
+var __setModuleDefault = (this && this.__setModuleDefault) || (Object.create ? (function(o, v) {
+    Object.defineProperty(o, "default", { enumerable: true, value: v });
+}) : function(o, v) {
+    o["default"] = v;
+});
+var __importStar = (this && this.__importStar) || (function () {
+    var ownKeys = function(o) {
+        ownKeys = Object.getOwnPropertyNames || function (o) {
+            var ar = [];
+            for (var k in o) if (Object.prototype.hasOwnProperty.call(o, k)) ar[ar.length] = k;
+            return ar;
+        };
+        return ownKeys(o);
+    };
+    return function (mod) {
+        if (mod && mod.__esModule) return mod;
+        var result = {};
+        if (mod != null) for (var k = ownKeys(mod), i = 0; i < k.length; i++) if (k[i] !== "default") __createBinding(result, mod, k[i]);
+        __setModuleDefault(result, mod);
+        return result;
+    };
+})();
+Object.defineProperty(exports, "__esModule", ({ value: true }));
+exports.runApplicationDeployment = runApplicationDeployment;
+const core = __importStar(__nccwpck_require__(7484));
+const helpers_1 = __nccwpck_require__(2096);
+const resources_1 = __nccwpck_require__(3251);
+const wait_and_health_1 = __nccwpck_require__(8272);
+async function runApplicationDeployment(client, inputs) {
+    core.info('🚀 Starting application deployment...');
+    core.info('='.repeat(60));
+    let projectId;
+    let environmentId;
+    let applicationId = inputs.applicationId;
+    if (!applicationId) {
+        projectId = await (0, resources_1.resolveProject)(client, inputs);
+        environmentId = await (0, resources_1.resolveEnvironment)(client, inputs, projectId);
+        if (!inputs.applicationName) {
+            throw new Error('Either application-id or application-name must be provided');
+        }
+        core.startGroup('📦 Application');
+        const project = await client.getProject(projectId);
+        const environment = project.environments?.find(env => (env.environmentId || env.id) === environmentId);
+        const existing = environment?.applications?.find(app => app.name === inputs.applicationName);
+        if (!existing) {
+            throw new Error(`Application "${inputs.applicationName}" not found. Create it in Dokploy Admin first.`);
+        }
+        applicationId = existing.applicationId || existing.id;
+        core.info(`✅ Found application: ${inputs.applicationName} (ID: ${applicationId})`);
+        core.endGroup();
+    }
+    else {
+        core.info(`📦 Using application ID: ${applicationId}`);
+    }
+    if (!applicationId) {
+        throw new Error('Either application-id or application-name must be provided');
+    }
+    core.setOutput('application-id', applicationId);
+    core.startGroup('🐳 Docker Provider Configuration');
+    await client.saveDockerProvider(applicationId, inputs.dockerImage, inputs.registryUrl, inputs.registryUsername, inputs.registryPassword);
+    core.endGroup();
+    if (inputs.cleanupOldContainers) {
+        core.startGroup('🧹 Cleanup Old Containers');
+        await client.stopApplication(applicationId);
+        core.info('⏳ Waiting 15 seconds for containers to stop...');
+        await (0, helpers_1.sleep)(15000);
+        core.endGroup();
+    }
+    core.startGroup('🚀 Deployment');
+    let previousDeploymentIds = [];
+    try {
+        const existingDeployments = await client.listApplicationDeployments(applicationId);
+        previousDeploymentIds = existingDeployments
+            .map(deployment => (0, helpers_1.getDeploymentId)(deployment))
+            .filter((id) => Boolean(id));
+    }
+    catch {
+        core.warning('⚠️ Could not list existing deployments before deploy');
+    }
+    const deployQueuedAt = Date.now();
+    try {
+        await client.deployApplication(applicationId, inputs.deploymentTitle || `Deploy ${inputs.dockerImage}`, inputs.deploymentDescription || 'Automated deployment via GitHub Actions');
+        core.info('✅ Deployment queued (application.deploy does not return a deployment ID)');
+    }
+    catch (deployError) {
+        core.setOutput('deployment-status', 'failed');
+        logApplicationDeployError(deployError, inputs);
+        core.endGroup();
+        throw deployError;
+    }
+    core.endGroup();
+    await (0, wait_and_health_1.waitForQueuedDeployment)({
+        client,
+        inputs,
+        kind: 'application',
+        serviceId: applicationId,
+        previousDeploymentIds,
+        startedAfterMs: deployQueuedAt,
+        logDuration: true
+    });
+    core.info('');
+    core.info('='.repeat(60));
+    core.info('✅ Deployment completed successfully!');
+    core.info('='.repeat(60));
+    core.info(`📦 Application: ${applicationId}`);
+    if (projectId)
+        core.info(`📁 Project: ${projectId}`);
+    if (environmentId)
+        core.info(`🌍 Environment: ${environmentId}`);
+    core.info('='.repeat(60));
+}
+function logApplicationDeployError(deployError, inputs) {
+    const errorMessage = deployError instanceof Error ? deployError.message : String(deployError);
+    core.error('❌ Deployment Failed');
+    core.error('='.repeat(60));
+    core.error('');
+    if (errorMessage.includes('name must be valid as a DNS name component')) {
+        core.error(`DNS Name Validation Error:`);
+        core.error(`  One or more names (application, project, or environment) are invalid.`);
+        core.error('');
+        core.error(`DNS names must:`);
+        core.error(`  • Contain only lowercase letters, numbers, and hyphens`);
+        core.error(`  • Start and end with a letter or number`);
+        core.error(`  • Be 63 characters or less`);
+        core.error('');
+        core.error(`💡 Fix: Check your application-name, project-name, and environment-name inputs`);
+        if (inputs.applicationName) {
+            core.error(`   Application: "${inputs.applicationName}"`);
+        }
+        if (inputs.projectName) {
+            core.error(`   Project: "${inputs.projectName}"`);
+        }
+        if (inputs.environmentName) {
+            core.error(`   Environment: "${inputs.environmentName}"`);
+        }
+    }
+    else {
+        core.error(`Error: ${errorMessage}`);
+    }
+    core.error('');
+    core.error('='.repeat(60));
+}
+
+
+/***/ }),
+
+/***/ 7440:
+/***/ (function(__unused_webpack_module, exports, __nccwpck_require__) {
+
+"use strict";
+
+/**
+ * Docker Compose deployment workflow.
+ */
+var __createBinding = (this && this.__createBinding) || (Object.create ? (function(o, m, k, k2) {
+    if (k2 === undefined) k2 = k;
+    var desc = Object.getOwnPropertyDescriptor(m, k);
+    if (!desc || ("get" in desc ? !m.__esModule : desc.writable || desc.configurable)) {
+      desc = { enumerable: true, get: function() { return m[k]; } };
+    }
+    Object.defineProperty(o, k2, desc);
+}) : (function(o, m, k, k2) {
+    if (k2 === undefined) k2 = k;
+    o[k2] = m[k];
+}));
+var __setModuleDefault = (this && this.__setModuleDefault) || (Object.create ? (function(o, v) {
+    Object.defineProperty(o, "default", { enumerable: true, value: v });
+}) : function(o, v) {
+    o["default"] = v;
+});
+var __importStar = (this && this.__importStar) || (function () {
+    var ownKeys = function(o) {
+        ownKeys = Object.getOwnPropertyNames || function (o) {
+            var ar = [];
+            for (var k in o) if (Object.prototype.hasOwnProperty.call(o, k)) ar[ar.length] = k;
+            return ar;
+        };
+        return ownKeys(o);
+    };
+    return function (mod) {
+        if (mod && mod.__esModule) return mod;
+        var result = {};
+        if (mod != null) for (var k = ownKeys(mod), i = 0; i < k.length; i++) if (k[i] !== "default") __createBinding(result, mod, k[i]);
+        __setModuleDefault(result, mod);
+        return result;
+    };
+})();
+Object.defineProperty(exports, "__esModule", ({ value: true }));
+exports.runComposeDeployment = runComposeDeployment;
+const core = __importStar(__nccwpck_require__(7484));
+const helpers_1 = __nccwpck_require__(2096);
+const resources_1 = __nccwpck_require__(3251);
+const wait_and_health_1 = __nccwpck_require__(8272);
+async function runComposeDeployment(client, inputs) {
+    core.info('📦 Starting Docker Compose deployment...');
+    core.info('='.repeat(60));
+    const projectId = await (0, resources_1.resolveProject)(client, inputs);
+    const environmentId = await (0, resources_1.resolveEnvironment)(client, inputs, projectId);
+    core.startGroup('📦 Compose Service');
+    const composeName = inputs.composeName || inputs.applicationName;
+    if (!composeName) {
+        throw new Error('compose-name is required for compose deployments');
+    }
+    const existing = await client.findComposeByName(environmentId, composeName);
+    if (!existing) {
+        throw new Error(`Compose service "${composeName}" not found. Create it in Dokploy Admin first.`);
+    }
+    const composeId = existing.composeId || existing.id;
+    if (!composeId) {
+        throw new Error(`Compose service "${composeName}" was found but has no ID`);
+    }
+    core.info(`✅ Found compose service: ${composeName} (ID: ${composeId})`);
+    core.setOutput('application-id', composeId);
+    core.setOutput('compose-id', composeId);
+    core.endGroup();
+    core.startGroup('📝 Compose File Configuration');
+    let composeContent = '';
+    if (inputs.dokployTemplateBase64) {
+        core.info('📥 Loading Dokploy template from Base64...');
+        composeContent = Buffer.from(inputs.dokployTemplateBase64, 'base64').toString('utf-8');
+        core.info(`✅ Template decoded (${composeContent.split('\n').length} lines)`);
+    }
+    else if (inputs.composeRaw) {
+        core.info('📥 Using raw compose content...');
+        composeContent = inputs.composeRaw;
+        core.info(`✅ Compose content loaded (${composeContent.split('\n').length} lines)`);
+    }
+    else if (inputs.composeFile) {
+        const fs = await Promise.resolve().then(() => __importStar(__nccwpck_require__(1943)));
+        const path = await Promise.resolve().then(() => __importStar(__nccwpck_require__(6928)));
+        core.info(`📥 Reading compose file: ${inputs.composeFile}`);
+        const fullPath = path.resolve(process.cwd(), inputs.composeFile);
+        try {
+            composeContent = await fs.readFile(fullPath, 'utf-8');
+            core.info(`✅ Compose file loaded (${composeContent.split('\n').length} lines)`);
+        }
+        catch (error) {
+            core.error(`❌ Failed to read compose file: ${inputs.composeFile}`);
+            throw error;
+        }
+    }
+    if (composeContent) {
+        await client.saveComposeFile(composeId, composeContent);
+    }
+    core.endGroup();
+    core.startGroup('🚀 Deployment');
+    let previousDeploymentIds = [];
+    try {
+        const existingDeployments = await client.listComposeDeployments(composeId);
+        previousDeploymentIds = existingDeployments
+            .map(deployment => (0, helpers_1.getDeploymentId)(deployment))
+            .filter((id) => Boolean(id));
+    }
+    catch {
+        core.warning('⚠️ Could not list existing compose deployments before deploy');
+    }
+    const deployQueuedAt = Date.now();
+    try {
+        await client.deployCompose(composeId, inputs.deploymentTitle || `Deploy compose: ${composeName}`, inputs.deploymentDescription || 'Automated compose deployment via GitHub Actions');
+        core.info('✅ Deployment queued');
+    }
+    catch (deployError) {
+        core.setOutput('deployment-status', 'failed');
+        core.error(`❌ Deployment Failed: ${deployError}`);
+        core.endGroup();
+        throw deployError;
+    }
+    core.endGroup();
+    await (0, wait_and_health_1.waitForQueuedDeployment)({
+        client,
+        inputs,
+        kind: 'compose',
+        serviceId: composeId,
+        previousDeploymentIds,
+        startedAfterMs: deployQueuedAt
+    });
+    core.info('');
+    core.info('='.repeat(60));
+    core.info('✅ Compose deployment completed successfully!');
+    core.info('='.repeat(60));
+    core.info(`📦 Compose Service: ${composeId}`);
+    core.info(`📁 Project: ${projectId}`);
+    core.info('='.repeat(60));
+}
+
+
+/***/ }),
+
+/***/ 3251:
+/***/ (function(__unused_webpack_module, exports, __nccwpck_require__) {
+
+"use strict";
+
+/**
+ * Resolve existing project and environment. Resources are never created.
+ */
+var __createBinding = (this && this.__createBinding) || (Object.create ? (function(o, m, k, k2) {
+    if (k2 === undefined) k2 = k;
+    var desc = Object.getOwnPropertyDescriptor(m, k);
+    if (!desc || ("get" in desc ? !m.__esModule : desc.writable || desc.configurable)) {
+      desc = { enumerable: true, get: function() { return m[k]; } };
+    }
+    Object.defineProperty(o, k2, desc);
+}) : (function(o, m, k, k2) {
+    if (k2 === undefined) k2 = k;
+    o[k2] = m[k];
+}));
+var __setModuleDefault = (this && this.__setModuleDefault) || (Object.create ? (function(o, v) {
+    Object.defineProperty(o, "default", { enumerable: true, value: v });
+}) : function(o, v) {
+    o["default"] = v;
+});
+var __importStar = (this && this.__importStar) || (function () {
+    var ownKeys = function(o) {
+        ownKeys = Object.getOwnPropertyNames || function (o) {
+            var ar = [];
+            for (var k in o) if (Object.prototype.hasOwnProperty.call(o, k)) ar[ar.length] = k;
+            return ar;
+        };
+        return ownKeys(o);
+    };
+    return function (mod) {
+        if (mod && mod.__esModule) return mod;
+        var result = {};
+        if (mod != null) for (var k = ownKeys(mod), i = 0; i < k.length; i++) if (k[i] !== "default") __createBinding(result, mod, k[i]);
+        __setModuleDefault(result, mod);
+        return result;
+    };
+})();
+Object.defineProperty(exports, "__esModule", ({ value: true }));
+exports.resolveProject = resolveProject;
+exports.resolveEnvironment = resolveEnvironment;
+const core = __importStar(__nccwpck_require__(7484));
+async function resolveProject(client, inputs) {
+    core.startGroup('📁 Project');
+    let projectId = inputs.projectId;
+    if (!projectId && inputs.projectName) {
+        const existing = await client.findProjectByName(inputs.projectName);
+        if (!existing) {
+            throw new Error(`Project "${inputs.projectName}" not found. Create it in Dokploy Admin first.`);
+        }
+        projectId = existing.projectId || existing.id;
+        core.info(`✅ Found project: ${inputs.projectName} (ID: ${projectId})`);
+    }
+    if (!projectId) {
+        throw new Error('Either project-id or project-name must be provided');
+    }
+    core.setOutput('project-id', projectId);
+    core.endGroup();
+    return projectId;
+}
+async function resolveEnvironment(client, inputs, projectId) {
+    core.startGroup('🌍 Environment');
+    let environmentId = inputs.environmentId;
+    if (!environmentId && inputs.environmentName) {
+        const existing = await client.findEnvironmentInProject(projectId, inputs.environmentName);
+        if (!existing) {
+            throw new Error(`Environment "${inputs.environmentName}" not found in project. Create it in Dokploy Admin first.`);
+        }
+        environmentId = existing.environmentId || existing.id;
+        core.info(`✅ Found environment: ${inputs.environmentName} (ID: ${environmentId})`);
+    }
+    if (!environmentId) {
+        throw new Error('Either environment-id or environment-name must be provided');
+    }
+    core.setOutput('environment-id', environmentId);
+    core.endGroup();
+    return environmentId;
+}
+
+
+/***/ }),
+
+/***/ 8272:
+/***/ (function(__unused_webpack_module, exports, __nccwpck_require__) {
+
+"use strict";
+
+/**
+ * Shared wait-for-deployment step.
+ */
+var __createBinding = (this && this.__createBinding) || (Object.create ? (function(o, m, k, k2) {
+    if (k2 === undefined) k2 = k;
+    var desc = Object.getOwnPropertyDescriptor(m, k);
+    if (!desc || ("get" in desc ? !m.__esModule : desc.writable || desc.configurable)) {
+      desc = { enumerable: true, get: function() { return m[k]; } };
+    }
+    Object.defineProperty(o, k2, desc);
+}) : (function(o, m, k, k2) {
+    if (k2 === undefined) k2 = k;
+    o[k2] = m[k];
+}));
+var __setModuleDefault = (this && this.__setModuleDefault) || (Object.create ? (function(o, v) {
+    Object.defineProperty(o, "default", { enumerable: true, value: v });
+}) : function(o, v) {
+    o["default"] = v;
+});
+var __importStar = (this && this.__importStar) || (function () {
+    var ownKeys = function(o) {
+        ownKeys = Object.getOwnPropertyNames || function (o) {
+            var ar = [];
+            for (var k in o) if (Object.prototype.hasOwnProperty.call(o, k)) ar[ar.length] = k;
+            return ar;
+        };
+        return ownKeys(o);
+    };
+    return function (mod) {
+        if (mod && mod.__esModule) return mod;
+        var result = {};
+        if (mod != null) for (var k = ownKeys(mod), i = 0; i < k.length; i++) if (k[i] !== "default") __createBinding(result, mod, k[i]);
+        __setModuleDefault(result, mod);
+        return result;
+    };
+})();
+Object.defineProperty(exports, "__esModule", ({ value: true }));
+exports.waitForQueuedDeployment = waitForQueuedDeployment;
+const core = __importStar(__nccwpck_require__(7484));
+const helpers_1 = __nccwpck_require__(2096);
+async function waitForQueuedDeployment(options) {
+    const { client, inputs, kind, serviceId, previousDeploymentIds, startedAfterMs, logDuration } = options;
+    if (!inputs.waitForDeployment) {
+        core.setOutput('deployment-status', 'success');
+        core.setOutput('health-check-status', 'skipped');
+        return false;
+    }
+    core.startGroup('⏳ Waiting for Deployment');
+    try {
+        const timeout = inputs.deploymentTimeout || 300;
+        const finalDeployment = await client.waitForServiceDeployment({
+            kind,
+            serviceId,
+            previousDeploymentIds,
+            startedAfterMs,
+            timeoutSeconds: timeout
+        });
+        const deploymentId = (0, helpers_1.getDeploymentId)(finalDeployment);
+        if (deploymentId) {
+            core.setOutput('deployment-id', deploymentId);
+        }
+        core.setOutput('deployment-status', finalDeployment.status || 'done');
+        if (logDuration) {
+            const startedAt = Date.parse(finalDeployment.startedAt || '');
+            if (!Number.isNaN(startedAt)) {
+                core.info(`✅ Deployment completed in ${Math.round((Date.now() - startedAt) / 1000)}s`);
+            }
+            else {
+                core.info('✅ Deployment completed');
+            }
+        }
+        else {
+            core.info(`✅ Deployment completed`);
+        }
+    }
+    catch (waitError) {
+        core.setOutput('deployment-status', 'failed');
+        const errorMessage = waitError instanceof Error ? waitError.message : String(waitError);
+        core.error(`❌ Deployment wait failed: ${errorMessage}`);
+        core.endGroup();
+        throw waitError;
+    }
+    core.endGroup();
+    core.setOutput('health-check-status', 'skipped');
+    return true;
 }
 
 

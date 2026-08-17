@@ -85,13 +85,17 @@ export interface Container {
 export interface Deployment {
     deploymentId?: string;
     id?: string;
-    applicationId: string;
+    applicationId?: string;
+    composeId?: string;
     title?: string;
     description?: string;
-    status?: 'deploying' | 'completed' | 'failed' | 'pending';
+    status?: 'idle' | 'running' | 'done' | 'error' | 'deploying' | 'completed' | 'failed' | 'pending';
     startedAt?: string;
     completedAt?: string;
+    finishedAt?: string;
+    createdAt?: string;
     logs?: string;
+    errorMessage?: string;
 }
 export interface Compose {
     composeId?: string;
@@ -122,44 +126,16 @@ export interface ActionInputs {
     composeFile?: string;
     composeRaw?: string;
     composeName?: string;
-    composeServiceName?: string;
     dokployTemplateBase64?: string;
     projectId?: string;
     projectName?: string;
-    projectDescription?: string;
     environmentId?: string;
     environmentName?: string;
-    autoCreateResources?: boolean;
     applicationId?: string;
     applicationName?: string;
-    applicationTitle?: string;
-    applicationDescription?: string;
-    containerName?: string;
-    serverId?: string;
-    serverName?: string;
-    memoryLimit?: number;
-    memoryReservation?: number;
-    cpuLimit?: number;
-    cpuReservation?: number;
-    port?: number;
-    targetPort?: number;
-    restartPolicy?: string;
-    volumes?: string;
-    groupAdd?: string;
-    replicas?: number;
     registryUrl?: string;
     registryUsername?: string;
     registryPassword?: string;
-    env?: string;
-    envFile?: string;
-    envFromJson?: string;
-    domainHost?: string;
-    domainPath?: string;
-    applicationPort?: number;
-    domainHttps?: boolean;
-    sslCertificateType?: string;
-    domainStripPath?: boolean;
-    forceDomainRecreation?: boolean;
     deploymentTitle?: string;
     deploymentDescription?: string;
     rollbackActive?: boolean;
@@ -180,8 +156,6 @@ export interface ActionOutputs {
     applicationId?: string;
     projectId?: string;
     environmentId?: string;
-    serverId?: string;
-    deploymentUrl?: string;
     deploymentStatus?: string;
     healthCheckStatus?: string;
 }

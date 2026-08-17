@@ -2,7 +2,15 @@
  * Tests for utility helper functions
  */
 
-import { parseIntInput, parseBooleanInput, parseCpuLimit, sleep } from '../src/utils/helpers'
+import {
+  parseIntInput,
+  parseBooleanInput,
+  parseDokployUrl,
+  getDeploymentId,
+  isDeploymentSuccessful,
+  isDeploymentFailed,
+  sleep
+} from '../src/utils/helpers'
 
 describe('Utility Helpers', () => {
   describe('parseIntInput', () => {
@@ -46,41 +54,60 @@ describe('Utility Helpers', () => {
     })
   })
 
-  describe('parseCpuLimit', () => {
-    it('should parse number', () => {
-      expect(parseCpuLimit('500')).toBe(500)
-    })
-
-    it('should parse decimal number', () => {
-      expect(parseCpuLimit('0.5')).toBe(0.5)
-      expect(parseCpuLimit('1.0')).toBe(1.0)
-      expect(parseCpuLimit('2.5')).toBe(2.5)
-    })
-
-    it('should parse number with "m" suffix (millicpu)', () => {
-      expect(parseCpuLimit('500m')).toBe(0.5)  // 500m = 0.5 CPU
-      expect(parseCpuLimit('1000m')).toBe(1.0) // 1000m = 1.0 CPU
-      expect(parseCpuLimit('250m')).toBe(0.25) // 250m = 0.25 CPU
-    })
-
-    it('should be case insensitive for suffix', () => {
-      expect(parseCpuLimit('500M')).toBe(0.5)
-      expect(parseCpuLimit('1000M')).toBe(1.0)
-    })
-
-    it('should return undefined for empty string', () => {
-      expect(parseCpuLimit('')).toBeUndefined()
-    })
-
-    it('should throw error for invalid format', () => {
-      expect(() => parseCpuLimit('abc')).toThrow('CPU limit must be a valid number')
-    })
-  })
-
   describe('sleep', () => {
     it('should return a promise', () => {
       const result = sleep(100)
       expect(result).toBeInstanceOf(Promise)
+    })
+  })
+
+  describe('parseDokployUrl', () => {
+    it('should keep origin URL without credentials', () => {
+      expect(parseDokployUrl('https://panel.example.com')).toEqual({
+        baseUrl: 'https://panel.example.com'
+      })
+    })
+
+    it('should strip trailing slash', () => {
+      expect(parseDokployUrl('https://panel.example.com/').baseUrl).toBe(
+        'https://panel.example.com'
+      )
+    })
+
+    it('should extract Basic Authorization from userinfo', () => {
+      const result = parseDokployUrl('https://github-actions:xxxxx@panel.example.com')
+
+      expect(result.baseUrl).toBe('https://panel.example.com')
+      expect(result.basicAuthHeader).toBe(
+        `Basic ${Buffer.from('github-actions:xxxxx').toString('base64')}`
+      )
+    })
+
+    it('should decode percent-encoded credentials', () => {
+      const result = parseDokployUrl('https://user:p%40ss%3Aword@panel.example.com')
+
+      expect(result.basicAuthHeader).toBe(
+        `Basic ${Buffer.from('user:p@ss:word').toString('base64')}`
+      )
+    })
+  })
+
+  describe('deployment helpers', () => {
+    it('should read Dokploy deploymentId', () => {
+      expect(getDeploymentId({ deploymentId: 'dep-1', applicationId: 'app' })).toBe('dep-1')
+    })
+
+    it('should ignore non-object deploy responses like true', () => {
+      expect(getDeploymentId(true as never)).toBeUndefined()
+      expect(getDeploymentId(null)).toBeUndefined()
+    })
+
+    it('should treat Dokploy done as success and error as failure', () => {
+      expect(isDeploymentSuccessful('done')).toBe(true)
+      expect(isDeploymentSuccessful('completed')).toBe(true)
+      expect(isDeploymentFailed('error')).toBe(true)
+      expect(isDeploymentFailed('failed')).toBe(true)
+      expect(isDeploymentSuccessful('running')).toBe(false)
     })
   })
 })

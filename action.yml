@@ -10,7 +10,7 @@ branding:
 inputs:
   # ===== Core Configuration (Required) =====
   dokploy-url:
-    description: 'The URL of your Dokploy instance (e.g., https://dokploy.example.com)'
+    description: 'The URL of your Dokploy instance (e.g., https://dokploy.example.com). Optional HTTP Basic Auth for a reverse proxy: https://user:password@dokploy.example.com (percent-encode special characters in the password).'
     required: true
 
   api-key:
@@ -22,26 +22,26 @@ inputs:
     required: false
     default: ''
 
+  application-name:
+    description: 'Existing Dokploy application name (optional if using application-id)'
+    required: false
+    default: ''
+
   docker-image:
     description: 'Docker image to deploy (e.g., ghcr.io/user/app:v1.0.0). Required for application deployments, optional for compose deployments.'
     required: false
     default: ''
 
-  # ===== Project & Environment Management =====
+  # ===== Project & Environment (must already exist) =====
   project-id:
     description: 'Dokploy project ID (optional if using project-name)'
     required: false
     default: ''
 
   project-name:
-    description: 'Dokploy project name (will be created if not exists)'
+    description: 'Existing Dokploy project name'
     required: false
     default: ''
-
-  project-description:
-    description: 'Description for the project (used when creating new project)'
-    required: false
-    default: 'Automated deployment project'
 
   environment-id:
     description: 'Dokploy environment ID (optional if using environment-name)'
@@ -49,24 +49,9 @@ inputs:
     default: ''
 
   environment-name:
-    description: 'Dokploy environment name (will be created if not exists)'
+    description: 'Existing Dokploy environment name'
     required: false
     default: 'production'
-
-  application-name:
-    description: 'Dokploy application name (will be created/updated)'
-    required: false
-    default: ''
-
-  server-name:
-    description: 'Server name for deployment (e.g., Hostinger-Server1)'
-    required: false
-    default: ''
-
-  auto-create-resources:
-    description: 'Automatically create project/environment/application if they do not exist'
-    required: false
-    default: 'true'
 
   # ===== Deployment Control =====
   wait-for-completion:
@@ -132,48 +117,6 @@ inputs:
     required: false
     default: 'true'
 
-  # ===== Resource Limits =====
-  memory-limit:
-    description: 'Maximum memory limit for container in MB (e.g., 512 for 512MB)'
-    required: false
-    default: ''
-
-  memory-reservation:
-    description: 'Soft memory reservation in MB (e.g., 256 for 256MB)'
-    required: false
-    default: ''
-
-  cpu-limit:
-    description: 'Maximum CPU limit (e.g., 1.0 for 1 CPU, 0.5 for half CPU)'
-    required: false
-    default: ''
-
-  cpu-reservation:
-    description: 'CPU reservation/guaranteed allocation (e.g., 0.25 for quarter CPU)'
-    required: false
-    default: ''
-
-  restart-policy:
-    description: 'Container restart policy: always, unless-stopped, on-failure, no'
-    required: false
-    default: 'unless-stopped'
-
-  container-name:
-    description: 'Custom container name. Supports templates: {app} (application name), {version} (image tag/version), {env} (environment name). Example: "{app}-{version}" becomes "myapp-v1.0.0"'
-    required: false
-    default: ''
-
-  # ===== Docker Advanced Configuration =====
-  volumes:
-    description: 'Container volume mounts (one per line). Format: /host/path:/container/path or /host/path:/container/path:ro. Example: /var/run/docker.sock:/var/run/docker.sock'
-    required: false
-    default: ''
-
-  group-add:
-    description: 'Additional groups to add the container user to (comma-separated). Example: "988" for Docker group or "docker,sudo"'
-    required: false
-    default: ''
-
   # ===== Docker Compose & Template Deployments =====
   deployment-type:
     description: 'Deployment type: application (default) or compose. Use "compose" to deploy from docker-compose.yml or Dokploy template.'
@@ -195,21 +138,10 @@ inputs:
     required: false
     default: ''
 
-  compose-service-name:
-    description: 'Service name from docker-compose.yml to expose via domain (e.g., "coder", "web"). Required for multi-service compose files. Defaults to compose-name.'
-    required: false
-    default: ''
-
   dokploy-template-base64:
     description: 'Base64-encoded Dokploy template (from templates marketplace). Alternative to compose-file. Used when deployment-type is "compose".'
     required: false
     default: ''
-
-  # ===== Scaling Configuration =====
-  replicas:
-    description: 'Number of container replicas to run (Docker Swarm)'
-    required: false
-    default: '1'
 
   # ===== Docker Registry Configuration =====
   registry-url:
@@ -226,43 +158,6 @@ inputs:
     description: 'Docker registry password/token'
     required: false
     default: ''
-
-  # ===== Environment Variables =====
-  env:
-    description: 'Environment variables as KEY=VALUE pairs, one per line'
-    required: false
-    default: ''
-
-  env-file:
-    description: 'Path to .env file with environment variables'
-    required: false
-    default: ''
-
-  env-from-json:
-    description: 'Environment variables in JSON format: {"KEY1":"value1","KEY2":"value2"}'
-    required: false
-    default: ''
-
-  # ===== Domain Configuration =====
-  domain-host:
-    description: 'Domain host for the application (e.g., app.example.com)'
-    required: false
-    default: ''
-
-  domain-path:
-    description: 'Domain path prefix (e.g., /api)'
-    required: false
-    default: '/'
-
-  application-port:
-    description: 'Container port that the application listens on (not the domain port which is always 80/443)'
-    required: false
-    default: '80'
-
-  domain-https:
-    description: 'Enable HTTPS for domain (true/false)'
-    required: false
-    default: 'true'
 
   # ===== Advanced Options =====
   deployment-strategy:
@@ -293,15 +188,15 @@ outputs:
     value: ${{ steps.cleanup.outputs.removed-count }}
 
   project-id:
-    description: 'The project ID (created or existing)'
+    description: 'The resolved project ID'
     value: ${{ steps.deploy.outputs.project-id }}
 
   environment-id:
-    description: 'The environment ID (created or existing)'
+    description: 'The resolved environment ID'
     value: ${{ steps.deploy.outputs.environment-id }}
 
   application-id:
-    description: 'The application ID (created or updated)'
+    description: 'The resolved application ID'
     value: ${{ steps.deploy.outputs.application-id }}
 
 runs:

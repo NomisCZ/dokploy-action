@@ -4,7 +4,8 @@
  */
 
 import { DokployClient } from '../client/dokploy-client'
-import type { DokployConfig, Project, Environment, Application } from '../types/dokploy'
+import type { DokployConfig } from '../types/dokploy'
+import * as httpm from '@actions/http-client'
 
 // Mock @actions/core
 jest.mock('@actions/core', () => ({
@@ -14,6 +15,7 @@ jest.mock('@actions/core', () => ({
   warning: jest.fn(),
   setOutput: jest.fn(),
   setFailed: jest.fn(),
+  setSecret: jest.fn(),
   getInput: jest.fn((name: string) => {
     if (name === 'debug-mode') return 'false'
     return ''
@@ -22,6 +24,8 @@ jest.mock('@actions/core', () => ({
 
 // Mock @actions/http-client
 jest.mock('@actions/http-client')
+
+const MockHttpClient = httpm.HttpClient as jest.MockedClass<typeof httpm.HttpClient>
 
 describe('DokployClient', () => {
   let client: DokployClient
@@ -49,213 +53,46 @@ describe('DokployClient', () => {
       const clientWithSlash = new DokployClient(configWithSlash)
       expect(clientWithSlash).toBeDefined()
     })
-  })
 
-  describe('createProject', () => {
-    it('should create project and return projectId', async () => {
-      const mockResponse = {
-        project: {
-          projectId: 'proj-123',
-          name: 'test-project',
-          description: 'Test description',
-          createdAt: '2024-01-01T00:00:00Z'
-        }
-      }
-
-      // Mock the post method
-      jest.spyOn(client as any, 'post').mockResolvedValue(mockResponse)
-
-      const result = await client.createProject('test-project', 'Test description')
-
-      expect(result.projectId).toBe('proj-123')
-      expect(result.defaultEnvironmentId).toBeUndefined()
-      expect((client as any).post).toHaveBeenCalledWith('/api/project.create', {
-        name: 'test-project',
-        description: 'Test description'
-      })
-    })
-
-    it('should return default environment ID when created', async () => {
-      const mockResponse = {
-        project: {
-          projectId: 'proj-123',
-          name: 'test-project'
-        },
-        environment: {
-          environmentId: 'env-default',
-          name: 'production',
-          projectId: 'proj-123'
-        }
-      }
-
-      jest.spyOn(client as any, 'post').mockResolvedValue(mockResponse)
-
-      const result = await client.createProject('test-project')
-
-      expect(result.projectId).toBe('proj-123')
-      expect(result.defaultEnvironmentId).toBe('env-default')
-    })
-
-    it('should handle project with id field instead of projectId', async () => {
-      const mockResponse = {
-        project: {
-          id: 'proj-456',
-          name: 'test-project'
-        }
-      }
-
-      jest.spyOn(client as any, 'post').mockResolvedValue(mockResponse)
-
-      const result = await client.createProject('test-project')
-      expect(result.projectId).toBe('proj-456')
-    })
-
-    it('should handle direct response without nested project', async () => {
-      const mockResponse = {
-        projectId: 'proj-789',
-        name: 'test-project'
-      }
-
-      jest.spyOn(client as any, 'post').mockResolvedValue(mockResponse)
-
-      const result = await client.createProject('test-project')
-      expect(result.projectId).toBe('proj-789')
-    })
-
-    it('should throw error if no project ID in response', async () => {
-      const mockResponse = {
-        project: {
-          name: 'test-project'
-          // Missing projectId and id
-        }
-      }
-
-      jest.spyOn(client as any, 'post').mockResolvedValue(mockResponse)
-
-      await expect(client.createProject('test-project')).rejects.toThrow(
-        'Failed to create project: No project ID in response'
-      )
-    })
-
-    it('should use default description if not provided', async () => {
-      const mockResponse = {
-        project: {
-          projectId: 'proj-789',
-          name: 'test-project'
-        }
-      }
-
-      jest.spyOn(client as any, 'post').mockResolvedValue(mockResponse)
-
-      await client.createProject('test-project')
-
-      expect((client as any).post).toHaveBeenCalledWith('/api/project.create', {
-        name: 'test-project',
-        description: 'Automated deployment project: test-project'
-      })
-    })
-  })
-
-  describe('createEnvironment', () => {
-    it('should create environment and return environmentId', async () => {
-      const mockEnvironment: Environment = {
-        environmentId: 'env-123',
-        name: 'production',
-        projectId: 'proj-123'
-      }
-
-      jest.spyOn(client as any, 'post').mockResolvedValue(mockEnvironment)
-
-      const envId = await client.createEnvironment('proj-123', 'production')
-
-      expect(envId).toBe('env-123')
-      expect((client as any).post).toHaveBeenCalledWith('/api/environment.create', {
-        projectId: 'proj-123',
-        name: 'production'
-      })
-    })
-
-    it('should handle environment with id field', async () => {
-      const mockEnvironment: Environment = {
-        id: 'env-456',
-        name: 'staging',
-        projectId: 'proj-123'
-      }
-
-      jest.spyOn(client as any, 'post').mockResolvedValue(mockEnvironment)
-
-      const envId = await client.createEnvironment('proj-123', 'staging')
-      expect(envId).toBe('env-456')
-    })
-
-    it('should throw error if no environment ID in response', async () => {
-      const mockEnvironment = {
-        name: 'production',
-        projectId: 'proj-123'
-      }
-
-      jest.spyOn(client as any, 'post').mockResolvedValue(mockEnvironment)
-
-      await expect(client.createEnvironment('proj-123', 'production')).rejects.toThrow(
-        'Failed to create environment: No environment ID in response'
-      )
-    })
-  })
-
-  describe('createApplication', () => {
-    it('should create application and return applicationId', async () => {
-      const mockApplication: Application = {
-        applicationId: 'app-123',
-        name: 'test-app',
-        projectId: 'proj-123',
-        environmentId: 'env-123',
-        serverId: 'server-123'
-      }
-
-      jest.spyOn(client as any, 'post').mockResolvedValue(mockApplication)
-
-      const appId = await client.createApplication({
-        name: 'test-app',
-        environmentId: 'env-123',
-        serverId: 'server-123'
+    it('should send Basic Authorization from URL userinfo and keep x-api-key', () => {
+      new DokployClient({
+        url: 'https://github-actions:xxxxx@panel.example.com',
+        apiKey: 'dokploy-key'
       })
 
-      expect(appId).toBe('app-123')
-    })
-
-    it('should handle application with id field', async () => {
-      const mockApplication: Application = {
-        id: 'app-456',
-        name: 'test-app',
-        projectId: 'proj-123',
-        environmentId: 'env-123',
-        serverId: 'server-123'
-      }
-
-      jest.spyOn(client as any, 'post').mockResolvedValue(mockApplication)
-
-      const appId = await client.createApplication({
-        name: 'test-app',
-        environmentId: 'env-123'
-      })
-
-      expect(appId).toBe('app-456')
-    })
-
-    it('should throw error if no application ID in response', async () => {
-      const mockApplication = {
-        name: 'test-app',
-        environmentId: 'env-123'
-      }
-
-      jest.spyOn(client as any, 'post').mockResolvedValue(mockApplication)
-
-      await expect(
-        client.createApplication({
-          name: 'test-app',
-          environmentId: 'env-123'
+      expect(MockHttpClient).toHaveBeenCalledWith(
+        'dokploy-github-action',
+        undefined,
+        expect.objectContaining({
+          headers: expect.objectContaining({
+            'x-api-key': 'dokploy-key',
+            Authorization: `Basic ${Buffer.from('github-actions:xxxxx').toString('base64')}`
+          })
         })
-      ).rejects.toThrow('Failed to create application: No application ID in response')
+      )
+    })
+
+    it('should strip userinfo from the request base URL', () => {
+      const clientWithAuth = new DokployClient({
+        url: 'https://github-actions:xxxxx@panel.example.com',
+        apiKey: 'dokploy-key'
+      })
+
+      expect((clientWithAuth as unknown as { baseUrl: string }).baseUrl).toBe(
+        'https://panel.example.com'
+      )
+    })
+
+    it('should not set Authorization when URL has no userinfo', () => {
+      expect(MockHttpClient).toHaveBeenCalledWith(
+        'dokploy-github-action',
+        undefined,
+        expect.objectContaining({
+          headers: expect.not.objectContaining({
+            Authorization: expect.anything()
+          })
+        })
+      )
     })
   })
 
@@ -268,7 +105,7 @@ describe('DokployClient', () => {
       expect(postSpy).toHaveBeenCalledWith('/api/application.saveDockerProvider', {
         applicationId: 'app-123',
         dockerImage: 'ghcr.io/org/app:latest',
-        registryUrl: 'ghcr.io',
+        registryUrl: '',
         username: '',
         password: ''
       })
@@ -295,45 +132,51 @@ describe('DokployClient', () => {
     })
   })
 
-  describe('Response Parsing', () => {
-    it('should handle nested project response', async () => {
-      const response = {
-        project: { projectId: 'proj-123', name: 'test' }
-      }
-      jest.spyOn(client as any, 'post').mockResolvedValue(response)
+  describe('deployments', () => {
+    it('should list application deployments from deployment.all', async () => {
+      const getSpy = jest
+        .spyOn(client as any, 'get')
+        .mockResolvedValue([{ deploymentId: 'dep-1', status: 'done', applicationId: 'app-1' }])
 
-      const result = await client.createProject('test')
-      expect(result.projectId).toBe('proj-123')
+      const result = await client.listApplicationDeployments('app-1')
+
+      expect(getSpy).toHaveBeenCalledWith('/api/deployment.all?applicationId=app-1')
+      expect(result[0].deploymentId).toBe('dep-1')
     })
 
-    it('should handle direct response with projectId', async () => {
-      const response = { projectId: 'proj-456', name: 'test' }
-      jest.spyOn(client as any, 'post').mockResolvedValue(response)
+    it('should wait for a new deployment that finishes with done', async () => {
+      jest.spyOn(client as any, 'get').mockResolvedValue([
+        { deploymentId: 'dep-new', status: 'done', applicationId: 'app-1' },
+        { deploymentId: 'dep-old', status: 'done', applicationId: 'app-1' }
+      ])
 
-      const result = await client.createProject('test')
-      expect(result.projectId).toBe('proj-456')
+      const result = await client.waitForServiceDeployment({
+        kind: 'application',
+        serviceId: 'app-1',
+        previousDeploymentIds: ['dep-old'],
+        timeoutSeconds: 5,
+        pollIntervalSeconds: 0
+      })
+
+      expect(result.deploymentId).toBe('dep-new')
     })
 
-    it('should prefer projectId over id when both present', async () => {
-      const response = {
-        project: { projectId: 'proj-primary', id: 'proj-secondary', name: 'test' }
-      }
-      jest.spyOn(client as any, 'post').mockResolvedValue(response)
+    it('should fail when the new deployment status is error', async () => {
+      jest
+        .spyOn(client as any, 'get')
+        .mockResolvedValue([
+          { deploymentId: 'dep-new', status: 'error', applicationId: 'app-1', errorMessage: 'boom' }
+        ])
 
-      const result = await client.createProject('test')
-      expect(result.projectId).toBe('proj-primary')
-    })
-
-    it('should extract default environment from response', async () => {
-      const response = {
-        project: { projectId: 'proj-123', name: 'test' },
-        environment: { environmentId: 'env-123', name: 'production' }
-      }
-      jest.spyOn(client as any, 'post').mockResolvedValue(response)
-
-      const result = await client.createProject('test')
-      expect(result.projectId).toBe('proj-123')
-      expect(result.defaultEnvironmentId).toBe('env-123')
+      await expect(
+        client.waitForServiceDeployment({
+          kind: 'application',
+          serviceId: 'app-1',
+          previousDeploymentIds: [],
+          timeoutSeconds: 5,
+          pollIntervalSeconds: 0
+        })
+      ).rejects.toThrow('Deployment failed')
     })
   })
 })

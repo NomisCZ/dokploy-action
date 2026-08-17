@@ -58,15 +58,15 @@ describe('parseInputs', () => {
         'dokploy-url': 'https://dokploy.example.com',
         'api-key': 'test-api-key',
         'docker-image': 'nginx:latest',
-        'auto-create-resources': 'false',
-        'wait-for-deployment': 'true'
+        'debug-mode': 'false',
+        'wait-for-completion': 'true'
       }
       return inputs[name] || ''
     })
 
     const result = parseInputs()
 
-    expect(result.autoCreateResources).toBe(false)
+    expect(result.debugMode).toBe(false)
     expect(result.waitForDeployment).toBe(true)
   })
 
@@ -76,18 +76,14 @@ describe('parseInputs', () => {
         'dokploy-url': 'https://dokploy.example.com',
         'api-key': 'test-api-key',
         'docker-image': 'nginx:latest',
-        'port': '8080',
-        'memory-limit': '512',
-        'replicas': '3'
+        timeout: '45'
       }
       return inputs[name] || ''
     })
 
     const result = parseInputs()
 
-    expect(result.port).toBe(8080)
-    expect(result.memoryLimit).toBe(512)
-    expect(result.replicas).toBe(3)
+    expect(result.deploymentTimeout).toBe(45)
   })
 
   it('should use default values for optional inputs', () => {
@@ -103,12 +99,9 @@ describe('parseInputs', () => {
     const result = parseInputs()
 
     expect(result.environmentName).toBe('production')
-    expect(result.serverName).toBeUndefined()
     expect(result.registryUrl).toBeUndefined()
-    expect(result.autoCreateResources).toBe(true)
     expect(result.waitForDeployment).toBe(true)
     expect(result.healthCheckEnabled).toBe(true)
-    expect(result.domainHttps).toBe(true)
   })
 
   it('should mask sensitive inputs', () => {
@@ -128,22 +121,19 @@ describe('parseInputs', () => {
     expect(mockSetSecret).toHaveBeenCalledWith('secret-password')
   })
 
-  it('should parse CPU limits with m suffix', () => {
+  it('should mask Basic Auth credentials from dokploy-url', () => {
     mockGetInput.mockImplementation((name: string) => {
       const inputs: Record<string, string> = {
-        'dokploy-url': 'https://dokploy.example.com',
+        'dokploy-url': 'https://github-actions:proxy-secret@panel.example.com',
         'api-key': 'test-api-key',
-        'docker-image': 'nginx:latest',
-        'cpu-limit': '500m',
-        'cpu-reservation': '250m'
+        'docker-image': 'nginx:latest'
       }
       return inputs[name] || ''
     })
 
-    const result = parseInputs()
+    parseInputs()
 
-    expect(result.cpuLimit).toBe(0.5)   // 500m = 0.5 CPU
-    expect(result.cpuReservation).toBe(0.25) // 250m = 0.25 CPU
+    expect(mockSetSecret).toHaveBeenCalledWith('github-actions')
+    expect(mockSetSecret).toHaveBeenCalledWith('proxy-secret')
   })
 })
-

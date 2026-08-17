@@ -3,54 +3,14 @@
  */
 
 import {
-  validateMemory,
-  validateCpu,
   validateDnsName,
   validatePort,
-  validateReplicas,
-  validateDomainHost,
   validateDockerImage,
   validateAllInputs,
   ValidationError
 } from '../validators'
 
 describe('validators', () => {
-  describe('validateMemory', () => {
-    it('should accept valid memory values', () => {
-      expect(() => validateMemory(4, 'memory-limit')).not.toThrow()
-      expect(() => validateMemory(128, 'memory-limit')).not.toThrow()
-      expect(() => validateMemory(1024, 'memory-limit')).not.toThrow()
-    })
-
-    it('should reject memory below 4MB', () => {
-      expect(() => validateMemory(1, 'memory-limit')).toThrow(ValidationError)
-      expect(() => validateMemory(2, 'memory-limit')).toThrow(ValidationError)
-      expect(() => validateMemory(3, 'memory-limit')).toThrow(ValidationError)
-    })
-
-    it('should accept undefined (optional)', () => {
-      expect(() => validateMemory(undefined, 'memory-limit')).not.toThrow()
-    })
-  })
-
-  describe('validateCpu', () => {
-    it('should accept valid CPU values', () => {
-      expect(() => validateCpu(0.001, 'cpu-limit')).not.toThrow()
-      expect(() => validateCpu(0.1, 'cpu-limit')).not.toThrow()
-      expect(() => validateCpu(1.0, 'cpu-limit')).not.toThrow()
-      expect(() => validateCpu(2.5, 'cpu-limit')).not.toThrow()
-    })
-
-    it('should reject CPU below 0.001', () => {
-      expect(() => validateCpu(0.0001, 'cpu-limit')).toThrow(ValidationError)
-      expect(() => validateCpu(1e-9, 'cpu-limit')).toThrow(ValidationError)
-    })
-
-    it('should accept undefined (optional)', () => {
-      expect(() => validateCpu(undefined, 'cpu-limit')).not.toThrow()
-    })
-  })
-
   describe('validateDnsName', () => {
     it('should accept valid DNS names', () => {
       expect(() => validateDnsName('app', 'application-name')).not.toThrow()
@@ -97,41 +57,6 @@ describe('validators', () => {
     })
   })
 
-  describe('validateReplicas', () => {
-    it('should accept valid replica counts', () => {
-      expect(() => validateReplicas(0, 'replicas')).not.toThrow()
-      expect(() => validateReplicas(1, 'replicas')).not.toThrow()
-      expect(() => validateReplicas(5, 'replicas')).not.toThrow()
-    })
-
-    it('should reject negative replicas', () => {
-      expect(() => validateReplicas(-1, 'replicas')).toThrow(ValidationError)
-      expect(() => validateReplicas(-5, 'replicas')).toThrow(ValidationError)
-    })
-
-    it('should accept undefined (optional)', () => {
-      expect(() => validateReplicas(undefined, 'replicas')).not.toThrow()
-    })
-  })
-
-  describe('validateDomainHost', () => {
-    it('should accept valid domain hosts', () => {
-      expect(() => validateDomainHost('example.com', 'domain-host')).not.toThrow()
-      expect(() => validateDomainHost('app.example.com', 'domain-host')).not.toThrow()
-      expect(() => validateDomainHost('api.subdomain.example.com', 'domain-host')).not.toThrow()
-    })
-
-    it('should reject invalid domain hosts', () => {
-      expect(() => validateDomainHost('invalid', 'domain-host')).toThrow(ValidationError)
-      expect(() => validateDomainHost('invalid_domain.com', 'domain-host')).toThrow(ValidationError)
-      expect(() => validateDomainHost('http://example.com', 'domain-host')).toThrow(ValidationError)
-    })
-
-    it('should accept undefined (optional)', () => {
-      expect(() => validateDomainHost(undefined, 'domain-host')).not.toThrow()
-    })
-  })
-
   describe('validateDockerImage', () => {
     it('should accept valid Docker images', () => {
       expect(() => validateDockerImage('nginx:latest', 'docker-image')).not.toThrow()
@@ -153,16 +78,7 @@ describe('validators', () => {
         dockerImage: 'nginx:latest',
         applicationName: 'my-app',
         projectName: 'my-project',
-        environmentName: 'production',
-        memoryLimit: 128,
-        memoryReservation: 64,
-        cpuLimit: 1.0,
-        cpuReservation: 0.5,
-        port: 8080,
-        targetPort: 3000,
-        applicationPort: 80,
-        replicas: 2,
-        domainHost: 'app.example.com'
+        environmentName: 'production'
       }
 
       expect(() => validateAllInputs(validInputs)).not.toThrow()
@@ -171,10 +87,7 @@ describe('validators', () => {
     it('should collect multiple validation errors', () => {
       const invalidInputs = {
         dockerImage: 'invalid',
-        applicationName: 'Invalid_Name',
-        memoryLimit: 2, // Too low
-        cpuLimit: 0.0001, // Too low
-        port: 100000 // Too high
+        applicationName: 'Invalid_Name'
       }
 
       expect(() => validateAllInputs(invalidInputs)).toThrow()
