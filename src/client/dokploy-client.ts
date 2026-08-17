@@ -294,7 +294,8 @@ export class DokployClient {
         )
       }
 
-      await sleep(pollIntervalMs)
+      const remainingMs = timeoutMs - (Date.now() - startTime)
+      await sleep(Math.min(pollIntervalMs, remainingMs))
     }
   }
 

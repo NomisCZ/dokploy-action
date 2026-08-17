@@ -55,14 +55,14 @@ inputs:
 
   # ===== Deployment Control =====
   wait-for-completion:
-    description: 'Wait for deployment to complete (true/false)'
+    description: 'Wait for Dokploy deployment to finish (true/false). Off by default so the workflow can continue after the deploy is queued.'
     required: false
-    default: 'true'
+    default: 'false'
 
   timeout:
-    description: 'Deployment timeout in seconds'
+    description: 'How long to wait for the deployment to finish, in seconds. Used only when wait-for-completion is true. Default 300 (5 minutes) to allow image pulls.'
     required: false
-    default: '20'
+    default: '300'
 
   # ===== Health Check Configuration =====
   enable-health-check:

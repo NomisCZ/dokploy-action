@@ -171,8 +171,8 @@ export function parseInputs(): ActionInputs {
     deploymentTitle: parseOptionalStringInput('deployment-title'),
     deploymentDescription: parseOptionalStringInput('deployment-description'),
     rollbackActive: parseBooleanInput(parseOptionalStringInput('rollback-active')),
-    waitForDeployment: parseBooleanInput(parseOptionalStringInput('wait-for-completion')) ?? true,
-    deploymentTimeout: parseIntInput(parseOptionalStringInput('timeout'), 'timeout'),
+    waitForDeployment: parseBooleanInput(parseOptionalStringInput('wait-for-completion')) ?? false,
+    deploymentTimeout: parseIntInput(parseOptionalStringInput('timeout'), 'timeout') ?? 300,
     cleanupOldContainers: parseBooleanInput(parseOptionalStringInput('cleanup-old-containers')),
 
     // Health Check

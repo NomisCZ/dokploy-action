@@ -100,8 +100,9 @@ describe('parseInputs', () => {
 
     expect(result.environmentName).toBe('production')
     expect(result.registryUrl).toBeUndefined()
-    expect(result.waitForDeployment).toBe(true)
+    expect(result.waitForDeployment).toBe(false)
     expect(result.healthCheckEnabled).toBe(true)
+    expect(result.deploymentTimeout).toBe(300)
   })
 
   it('should mask sensitive inputs', () => {
